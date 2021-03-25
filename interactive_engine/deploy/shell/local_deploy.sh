@@ -335,7 +335,7 @@ buildRust()
     # checkFileExist ${odpsTunnelSoPath} "libodps_tunnel.so not found"
     # odpsWrapperSoPath="${MAXGRAPH_RUST_DIR}/common/rust/ffi/tunnel-rust/native/build/lib/libtunnel_wrapper.so"
     # checkFileExist ${odpsWrapperSoPath} "libtunnel_wrapper.so not found"
-    pbSoDir="${MAXGRAPH_RUST_DIR}/common/rust/ffi/tunnel-rust/native/third_party/protobuf-2.4.1/lib"
+    # pbSoDir="${MAXGRAPH_RUST_DIR}/common/rust/ffi/tunnel-rust/native/third_party/protobuf-2.4.1/lib"
 
     nativeSoDir="${BUILD_OUTPUT_DIR}/${PACKAGE_DIR}/native"
     rm -rf ${nativeSoDir}
@@ -343,7 +343,7 @@ buildRust()
 
     # cp ${odpsTunnelSoPath} ${nativeSoDir}
     # cp ${odpsWrapperSoPath} ${nativeSoDir}
-    cp -r ${pbSoDir}/* ${nativeSoDir}
+    # cp -r ${pbSoDir}/* ${nativeSoDir}
 
 #    jnaLibName="libmaxgraph_jna.so"
 #    isJnaLibExist=${STORE_PACKAGE_NOT_EXIST}
