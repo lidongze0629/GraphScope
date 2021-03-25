@@ -257,9 +257,9 @@ executeBuild()
 {
     if [ "${buildMode}" = "release" ]
     then
-        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all --release && cd ${MAXGRAPH_RUST_DIR}/id-service/ && cargo build --all --release
+        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all --release
     else
-        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all && cd ${MAXGRAPH_RUST_DIR}/id-service/ && cargo build --all
+        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all 
     fi
 }
 
@@ -472,4 +472,3 @@ case ${cmd} in
     ;;
 
 esac
-
