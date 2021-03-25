@@ -259,7 +259,7 @@ executeBuild()
     then
         cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all --release
     else
-        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all 
+        cd ${MAXGRAPH_RUST_DIR}/executor/ && sh exec.sh cargo build --all
     fi
 }
 
@@ -323,11 +323,11 @@ buildRust()
         exit 1
     fi
 
-    idServiceBinaryPath="${MAXGRAPH_RUST_DIR}/id-service/target/${buildMode}/id-service"
-    checkFileExist ${idServiceBinaryPath} "id-service binary not found"
+    # idServiceBinaryPath="${MAXGRAPH_RUST_DIR}/id-service/target/${buildMode}/id-service"
+    # checkFileExist ${idServiceBinaryPath} "id-service binary not found"
 
     cd "${BUILD_OUTPUT_DIR}"
-    cp "${idServiceBinaryPath}" "${PACKAGE_DIR}/bin"
+    # cp "${idServiceBinaryPath}" "${PACKAGE_DIR}/bin"
     cp "${MAXGRAPH_RUST_DIR}/executor/store/log4rs.yml" "${PACKAGE_DIR}/conf"
 
     # add so into native dir
