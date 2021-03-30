@@ -168,6 +168,65 @@ public class InstanceManagerController {
         return createInstanceEntity;
     }
 
+
+    @RequestMapping(value = "create_local", method = RequestMethod.POST)
+    public CreateInstanceEntity createLocalInstance(@RequestParam("graphName") String graphName,
+                                                    @RequestParam("schemaPath") String schemaPath,
+                                                    @RequestParam("vineyardIpcSocket") String vineyardIpcSocket) throws Exception{
+        CreateInstanceEntity createInstanceEntity = new CreateInstanceEntity();
+        int errorCode;
+        String errorMessage;
+        int frontendPort = 0;
+
+        try {
+            List<String> createCommandList = new ArrayList<>();
+
+            createCommandList.add(instanceProperties.getCreateScript());
+            createCommandList.add(graphName);
+            createCommandList.add(schemaPath);
+            createCommandList.add("1"); // server id
+            createCommandList.add(vineyardIpcSocket);
+            String command = StringUtils.join(createCommandList, " ");
+            logger.info("start to create instance with command " + command);
+            Process process = Runtime.getRuntime().exec(command);
+
+            List<String> errorValueList = IOUtils.readLines(process.getErrorStream(), "UTF-8");
+            List<String> infoValueList = IOUtils.readLines(process.getInputStream(), "UTF-8");
+            infoValueList.addAll(errorValueList);
+            errorMessage = StringUtils.join(infoValueList, "\n");
+            errorCode = process.waitFor();
+            if (errorCode == 0) {
+                Pattern endpointPattern = Pattern.compile("FRONTEND_PORT:\\S+");
+                Matcher matcher = endpointPattern.matcher(errorMessage);
+                if (matcher.find()) {
+                    String frontendEndpoint = StringUtils.splitByWholeSeparator(StringUtils.removeStart(matcher.group(), "FRONTEND_PORT:"), " ")[0];
+//                    InstanceEntity instanceEntity = new InstanceEntity(frontendEndpoint, podNameList, containerName, this.instanceProperties.getCloseScript());
+//                    FrontendMemoryStorage.getFrontendStorage().addFrontendEndpoint(graphName, instanceEntity);
+                    String[] endpointArray = StringUtils.split(frontendEndpoint, ":");
+                    String ip = endpointArray[0];
+                    frontendPort = Integer.parseInt(endpointArray[1]);
+                    createInstanceEntity.setFrontHost(ip);
+                    createInstanceEntity.setFrontPort(frontendPort);
+                    logger.info("Found Frontend with ip: "+ ip + " and port:" + frontendEndpoint);
+                    if (!this.checkInstanceReady(ip, frontendPort)) {
+                        errorCode = -1;
+                        errorMessage = "Check instance ready timeout";
+                    }
+                } else {
+                    errorCode = -1;
+                }
+            }
+        } catch (Exception e) {
+            errorCode = -1;
+            errorMessage = ExceptionUtils.getMessage(e);
+        }
+
+        createInstanceEntity.setErrorCode(errorCode);
+        createInstanceEntity.setErrorMessage(errorMessage);
+
+        return createInstanceEntity;
+    }
+
     private boolean checkInstanceReady(String ip, int port) {
         if (ip.equals("localhost") || ip.equals("127.0.0.1")) {
             // now, used in mac os with docker-desktop kubernetes cluster,
