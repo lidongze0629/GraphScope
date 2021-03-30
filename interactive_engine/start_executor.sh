@@ -25,3 +25,5 @@ server_id=1
 export flag="maxgraph"$object_id"executor"
 #export VINEYARD_IPC_SOCKET=/tmp/vineyard.sock.1617013756979
 RUST_BACKTRACE=full $ROOT_DIR/build/0.0.1-SNAPSHOT/bin/executor --config $inner_config $flag $server_id 1>> $ROOT_DIR/logs/maxgraph-executor.out 2>> $ROOT_DIR/logs/maxgraph-executor.err  
+
+echo $! > $ROOT_DIR/executor.pid
