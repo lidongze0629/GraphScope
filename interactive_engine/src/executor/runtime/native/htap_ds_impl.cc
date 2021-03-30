@@ -31,7 +31,7 @@ void get_graph_handle(ObjectId id, PartitionId channel_num,
   LOG(INFO) << "enter " << __FUNCTION__;
 #endif
   handle->client = &vineyard::Client::Default();
-  LOG(INFO) << "Initialize vineyard client";
+  LOG(INFO) << "Initialize vineyard client: " << id;
   std::shared_ptr<vineyard::ArrowFragmentGroup> fg =
       std::dynamic_pointer_cast<vineyard::ArrowFragmentGroup>(
           handle->client->GetObject(id));
