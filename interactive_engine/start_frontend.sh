@@ -15,9 +15,9 @@ JAVA_OPT="-server -verbose:gc -Xloggc:./gc.log -XX:+PrintGCDetails -XX:+PrintGCD
 
 rm -rf $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
 cp $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties.bak $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
-inner_config=$ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
-sed -i "s/query.vineyard.schema.path=VINEYARD_SCHEMA_PATH/query.vineyard.schema.path=${schema_path}/g" inner_config
+sed -i "s/query.vineyard.schema.path=VINEYARD_SCHEMA_PATH/query.vineyard.schema.path=${schema_path}/g" $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
 
+inner_config=$ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
 
 cd ./src/frontend/frontendservice/target/classes/
 
