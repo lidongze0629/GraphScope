@@ -17,6 +17,8 @@ ROOT_DIR=$PWD
 
 ### example: start_mg_instance.sh 26758028691315914 /tmp/graph_fa37JncC.json 1 /tmp/vineyard.sock.1617013756979
 
+cd ~/yuxing.hyx/tmp/GraphScope/interactive_engine
+
 object_id=$1
 schema_path=$2
 server_id=$3

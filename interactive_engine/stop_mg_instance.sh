@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd ~/yuxing.hyx/tmp/GraphScope/interactive_engine
+
 coordinator_id=`cat coordinator.pid`
 frontend_id=`cat frontend.pid`
 executor_id=`cat executor.pid`
