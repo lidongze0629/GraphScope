@@ -1,6 +1,7 @@
 #!/bin/bash
 
 ROOT_DIR=$PWD
+rm -rf /home/maxgraph/logs/coordinator
 mkdir /home/maxgraph/logs/coordinator
 mkdir -p $ROOT_DIR/logs/
 
@@ -10,5 +11,4 @@ inner_config=$ROOT_DIR/deploy/docker/dockerfile/coordinator.application.properti
 
 cd $ROOT_DIR/src/coordinator/target/classes/
 
-java ${JAVA_OPT} com.alibaba.maxgraph.coordinator.CoordinatorMain $inner_config $object_id 1>$ROOT_DIR/logs/maxgraph-coordinator.out 2>$ROOT_DIR/logs/maxgraph-coordinator.err
-
+java ${JAVA_OPT} com.alibaba.maxgraph.coordinator.CoordinatorMain $inner_config $object_id 1>$ROOT_DIR/logs/maxgraph-coordinator.out 2>$ROOT_DIR/logs/maxgraph-coordinator.err 
