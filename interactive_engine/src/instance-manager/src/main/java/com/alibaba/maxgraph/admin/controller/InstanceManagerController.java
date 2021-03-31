@@ -332,6 +332,32 @@ public class InstanceManagerController {
         return createInstanceEntity;
     }
 
+    @RequestMapping("close_local")
+    public CloseInstanceEntity closeInstance(@RequestParam("graphName") String graphName) {
+        int errorCode;
+        String errorMessage;
+
+        try{
+            List<String> closeCommandList = new ArrayList<>();
+            closeCommandList.add(instanceProperties.getCloseScript());
+            closeCommandList.add(graphName);
+            String command = StringUtils.join(closeCommandList, " ");
+            logger.info("start to close instance with command " + command);
+            Process process = Runtime.getRuntime().exec(command);
+            List<String> errorValueList = IOUtils.readLines(process.getErrorStream(), "UTF-8");
+            List<String> infoValueList = IOUtils.readLines(process.getInputStream(), "UTF-8");
+            infoValueList.addAll(errorValueList);
+            errorMessage = StringUtils.join(infoValueList, "\n");
+            errorCode = process.waitFor();
+            FrontendMemoryStorage.getFrontendStorage().removeFrontendEndpoint(graphName);
+        } catch (Exception e) {
+            errorCode = -1;
+            errorMessage = ExceptionUtils.getMessage(e);
+        }
+
+        return new CloseInstanceEntity(errorCode, errorMessage);
+    }
+
     @RequestMapping("close")
     public CloseInstanceEntity closeInstance(@RequestParam("graphName") String graphName,
                                              @RequestParam("podNameList") String podNameList,
