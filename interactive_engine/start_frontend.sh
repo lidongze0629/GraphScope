@@ -26,4 +26,6 @@ cd ./src/frontend/frontendservice/target/classes/
 
 java ${JAVA_OPT} com.alibaba.maxgraph.frontendservice.FrontendServiceMain $inner_config $object_id 1>$LOG_DIR/maxgraph-frontend.out 2>$LOG_DIR/maxgraph-frontend.err &
 
+echo "FRONTEND_PORT:127.0.0.1:8182"
+
 echo $! > $ROOT_DIR/frontend_${object_id}.pid
