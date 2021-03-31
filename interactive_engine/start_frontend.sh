@@ -1,15 +1,14 @@
 #!/bin/bash
-
 ROOT_DIR=$PWD
-rm -rf /home/maxgraph/logs/frontend
-mkdir /home/maxgraph/logs/frontend
-mkdir -p $ROOT_DIR/logs/
 
 echo $1
 object_id=$1
 schema_path=$2
 
+mkdir -p mkdir /home/maxgraph/logs/frontend/frontend_${object_id}
+
 LOG_DIR=/home/maxgraph/logs/frontend/frontend_${object_id}
+
 
 JAVA_OPT="-server -verbose:gc -Xloggc:./gc.log -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintHeapAtGC -XX:+PrintTenuringDistribution -Djava.awt.headless=true -Dsun.net.client.defaultConnectTimeout=10000 -Dsun.net.client.defaultReadTimeout=30000 -XX:+DisableExplicitGC -XX:-OmitStackTraceInFastThrow -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=75 -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Dlogfilename=${LOG_DIR}/maxgraph-frontend.log -Dlogbasedir=/home/maxgraph/logs/frontend -Dlog4j.configurationFile=file:${ROOT_DIR}/build/0.0.1-SNAPSHOT/conf/log4j2.xml -classpath ${ROOT_DIR}/build/0.0.1-SNAPSHOT/conf/*:${ROOT_DIR}/build/0.0.1-SNAPSHOT/lib/*:"
 
