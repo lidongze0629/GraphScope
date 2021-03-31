@@ -17,6 +17,6 @@ inner_config=$ROOT_DIR/deploy/docker/dockerfile/coordinator.application.properti
 
 cd $ROOT_DIR/src/coordinator/target/classes/
 
-java ${JAVA_OPT} com.alibaba.maxgraph.coordinator.CoordinatorMain $inner_config $object_id 1>$LOG_DIR/maxgraph-coordinator.out 2>$LOG_DIR/logs/maxgraph-coordinator.err &
+java ${JAVA_OPT} com.alibaba.maxgraph.coordinator.CoordinatorMain $inner_config $object_id 1>$LOG_DIR/maxgraph-coordinator.out 2>$LOG_DIR/maxgraph-coordinator.err &
 
 echo $! > $ROOT_DIR/coordinator_${object_id}.pid
