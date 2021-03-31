@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 cd ~/yuxing.hyx/tmp/GraphScope/interactive_engine
 
