@@ -11,9 +11,9 @@ server_id=$2
 echo $3
 export VINEYARD_IPC_SOCKET=$3
 
-mkdir -p /home/maxgraph/logs/executor/logs_$object_id
+mkdir -p /home/maxgraph/logs/executor/executor_${object_id}
 
-export LOG_DIRS=/home/maxgraph/logs/executor/logs_$object_id
+export LOG_DIRS=/home/maxgraph/logs/executor/executor_${object_id}
 
 rm -rf $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
 cp $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties.bak $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
@@ -24,6 +24,6 @@ inner_config=$ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
 server_id=1
 export flag="maxgraph"$object_id"executor"
 #export VINEYARD_IPC_SOCKET=/tmp/vineyard.sock.1617013756979
-RUST_BACKTRACE=full $ROOT_DIR/build/0.0.1-SNAPSHOT/bin/executor --config $inner_config $flag $server_id 1>> $ROOT_DIR/logs/maxgraph-executor.out 2>> $ROOT_DIR/logs/maxgraph-executor.err &
+RUST_BACKTRACE=full $ROOT_DIR/build/0.0.1-SNAPSHOT/bin/executor --config $inner_config $flag $server_id 1>> $LOG_DIRS/maxgraph-executor.out 2>> $LOG_DIRS/maxgraph-executor.err &
 
-echo $! > $ROOT_DIR/executor.pid
+echo $! > $ROOT_DIR/executor_${object_id}.pid
