@@ -15,11 +15,11 @@ mkdir -p /home/maxgraph/logs/executor/executor_${object_id}
 
 export LOG_DIRS=/home/maxgraph/logs/executor/executor_${object_id}
 
-rm -rf $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
-cp $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties.bak $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
-sed -i "s/VINEYARD_OBJECT_ID/$object_id/g" $ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
+rm -rf $ROOT_DIR/deploy/local/executor.vineyard.properties
+cp $ROOT_DIR/deploy/local/executor.vineyard.properties.bak $ROOT_DIR/deploy/local/executor.vineyard.properties
+sed -i "s/VINEYARD_OBJECT_ID/$object_id/g" $ROOT_DIR/deploy/local/executor.vineyard.properties
 
-inner_config=$ROOT_DIR/deploy/docker/dockerfile/executor.vineyard.properties
+inner_config=$ROOT_DIR/deploy/local/executor.vineyard.properties
 
 server_id=1
 export flag="maxgraph"$object_id"executor"

@@ -16,11 +16,11 @@ JAVA_OPT="-server -verbose:gc -Xloggc:./gc.log -XX:+PrintGCDetails -XX:+PrintGCD
 
 REPLACE_SCHEMA_PATH=`echo ${schema_path//\//\\\/}`
 
-rm -rf $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
-cp $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties.bak $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
-sed -i "s/VINEYARD_SCHEMA_PATH/${REPLACE_SCHEMA_PATH}/g" $ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
+rm -rf $ROOT_DIR/deploy/local/frontend.vineyard.properties
+cp $ROOT_DIR/deploy/local/frontend.vineyard.properties.bak $ROOT_DIR/deploy/local/frontend.vineyard.properties
+sed -i "s/VINEYARD_SCHEMA_PATH/${REPLACE_SCHEMA_PATH}/g" $ROOT_DIR/deploy/local/frontend.vineyard.properties
 
-inner_config=$ROOT_DIR/deploy/docker/dockerfile/frontend.vineyard.properties
+inner_config=$ROOT_DIR/deploy/local/frontend.vineyard.properties
 
 cd ./src/frontend/frontendservice/target/classes/
 
