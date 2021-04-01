@@ -4,6 +4,7 @@ ROOT_DIR=$PWD
 echo $1
 object_id=$1
 schema_path=$2
+worker_num=$3
 
 mkdir -p mkdir /home/maxgraph/logs/frontend/frontend_${object_id}
 
@@ -19,6 +20,8 @@ REPLACE_SCHEMA_PATH=`echo ${schema_path//\//\\\/}`
 rm -rf $ROOT_DIR/deploy/local/frontend.vineyard.properties
 cp $ROOT_DIR/deploy/local/frontend.vineyard.properties.bak $ROOT_DIR/deploy/local/frontend.vineyard.properties
 sed -i "s/VINEYARD_SCHEMA_PATH/${REPLACE_SCHEMA_PATH}/g" $ROOT_DIR/deploy/local/frontend.vineyard.properties
+sed -i "s/RESOURCE_EXECUTOR_COUNT/${worker_num}/g" $ROOT_DIR/deploy/local/frontend.vineyard.properties
+sed -i "s/PARTITION_NUM/${worker_num}/g" $ROOT_DIR/deploy/local/frontend.vineyard.properties
 
 inner_config=$ROOT_DIR/deploy/local/frontend.vineyard.properties
 

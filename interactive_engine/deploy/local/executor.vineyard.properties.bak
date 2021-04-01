@@ -8,12 +8,12 @@ hdfs.default.fs = hdfs://namenode:9000
 
 [instance]
 graph.name = graphname
-partition.num = 1
+partition.num = PARTITION_NUM
 replica.count = 1
 
 [server]
-worker.id = 3
-worker.num = 1
+worker.id = 1
+worker.num = WORKER_NUM
 hb.interval.ms = 5000
 
 [rpc]

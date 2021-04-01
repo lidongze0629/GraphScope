@@ -172,7 +172,8 @@ public class InstanceManagerController {
     @RequestMapping(value = "create_local", method = RequestMethod.POST)
     public CreateInstanceEntity createLocalInstance(@RequestParam("graphName") String graphName,
                                                     @RequestParam("schemaPath") String schemaPath,
-                                                    @RequestParam("vineyardIpcSocket") String vineyardIpcSocket) throws Exception{
+                                                    @RequestParam("vineyardIpcSocket") String vineyardIpcSocket,
+                                                    @RequestParam("workerNum") String workerNum) throws Exception{
         CreateInstanceEntity createInstanceEntity = new CreateInstanceEntity();
         int errorCode;
         String errorMessage;
@@ -184,7 +185,7 @@ public class InstanceManagerController {
             createCommandList.add(instanceProperties.getCreateScript());
             createCommandList.add(graphName);
             createCommandList.add(schemaPath);
-            createCommandList.add("1"); // server id
+            createCommandList.add(workerNum);
             createCommandList.add(vineyardIpcSocket);
             String command = StringUtils.join(createCommandList, " ");
             logger.info("start to create instance with command " + command);
@@ -200,8 +201,8 @@ public class InstanceManagerController {
                 Matcher matcher = endpointPattern.matcher(errorMessage);
                 if (matcher.find()) {
                     String frontendEndpoint = StringUtils.splitByWholeSeparator(StringUtils.removeStart(matcher.group(), "FRONTEND_PORT:"), " ")[0];
-//                    InstanceEntity instanceEntity = new InstanceEntity(frontendEndpoint, podNameList, containerName, this.instanceProperties.getCloseScript());
-//                    FrontendMemoryStorage.getFrontendStorage().addFrontendEndpoint(graphName, instanceEntity);
+                    InstanceEntity instanceEntity = new InstanceEntity("127.0.0.1:8182", "", "", this.instanceProperties.getCloseScript());
+                    FrontendMemoryStorage.getFrontendStorage().addFrontendEndpoint(graphName, instanceEntity);
                     String[] endpointArray = StringUtils.split(frontendEndpoint, ":");
                     String ip = endpointArray[0];
                     frontendPort = Integer.parseInt(endpointArray[1]);
@@ -333,7 +334,8 @@ public class InstanceManagerController {
     }
 
     @RequestMapping("close_local")
-    public CloseInstanceEntity closeInstance(@RequestParam("graphName") String graphName) {
+    public CloseInstanceEntity closeInstance(@RequestParam("graphName") String graphName,
+                                             @RequestParam("workerNum") String workerNum) {
         int errorCode;
         String errorMessage;
 
@@ -341,6 +343,7 @@ public class InstanceManagerController {
             List<String> closeCommandList = new ArrayList<>();
             closeCommandList.add(instanceProperties.getCloseScript());
             closeCommandList.add(graphName);
+            closeCommandList.add(workerNum);
             String command = StringUtils.join(closeCommandList, " ");
             logger.info("start to close instance with command " + command);
             Process process = Runtime.getRuntime().exec(command);
