@@ -20,12 +20,16 @@ import datetime
 import logging
 import random
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from enum import Enum
 
 from gremlin_python.driver.client import Client
 from gremlin_python.driver.driver_remote_connection import DriverRemoteConnection
 from gremlin_python.process.anonymous_traversal import traversal
 
+from graphscope.config import GSConfig as gs_config
+from graphscope.framework.dag import DAGNode
+from graphscope.framework.dag_utils import create_interactive_query
 from graphscope.framework.loader import Loader
 
 logger = logging.getLogger("graphscope")
@@ -38,6 +42,52 @@ class InteractiveQueryStatus(Enum):
     Running = 1
     Failed = 2
     Closed = 3
+
+
+class InteractiveQueryDAGNode(DAGNode):
+    """A class represents a gremlin node in a DAG.
+
+    The following example demonstrates its usage:
+
+    .. code:: python
+
+        >>> # lazy node
+        >>> import graphscope as gs
+        >>> sess = gs.session(mode="lazy")
+        >>> g = sess.g() # <graphscope.framework.graph.GraphDAGNode object>
+        >>> ineractive = sess.gremlin(g)
+        >>> print(ineractive) # <graphscope.interactive.query.InteractiveQueryDAGNode object>
+        >>> r = ineractive.execute("g.V()")
+        >>> print(r) # <graphscope.ramework.context.ResultDAGNode>
+        >>> print(sess.run(r).one())
+        [2]
+        >>> subgraph = ineractive.subgraph("xxx")
+        >>> print(subgraph) # <graphscope.framework.graph.GraphDAGNode object>
+        >>> g2 = sess.run(subgraph)
+        >>> print(g2) # <graphscope.framework.graph.Graph object>
+    """
+
+    def __init__(self, session, graph, engine_params=None):
+        """
+        Args:
+            session (:class:`Session`): instance of GraphScope session.
+            graph (:class:`graphscope.framework.graph.GraphDAGNode`):
+                A graph instance that the gremlin query on.
+            engine_params (dict, optional):
+                Configuration to startup the interactive engine. See detail in:
+                `interactive_engine/deploy/docker/dockerfile/executor.vineyard.properties`
+        """
+        self._session = session
+        self._graph = graph
+        self._engine_params = engine_params
+        self._op = create_interactive_query(
+            self._graph,
+            self._engine_params,
+            gs_config.k8s_gie_gremlin_server_cpu,
+            gs_config.k8s_gie_gremlin_server_mem,
+        )
+        # add op to dag
+        self._session.dag.add_op(self._op)
 
 
 class InteractiveQuery(object):
@@ -55,30 +105,23 @@ class InteractiveQuery(object):
     to get a `GraphTraversalSource` for further traversal.
     """
 
-    def __init__(self, session, object_id, front_ip=None, front_port=None):
+    def __init__(self, interactive_query_node=None, frontend_endpoint=None):
+        """Construct a :class:`InteractiveQuery` object."""
+
         self._status = InteractiveQueryStatus.Initializing
-        self._session = session
-        self._object_id = object_id
-        self._error_msg = ""
-
-        if front_ip is not None and front_port is not None:
-            self._graph_url = "ws://%s:%d/gremlin" % (front_ip, front_port)
+        self._graph_url = None
+        # interactive_query_node is None used for create a interative query
+        # implicitly in eager mode
+        if interactive_query_node is not None:
+            self._interactive_query_node = interactive_query_node
+            self._session = self._interactive_query_node.session
+            # copy and set op evaluated
+            self._interactive_query_node = deepcopy(self._interactive_query_node)
+            self._interactive_query_node.evaluated = True
+            self._session.dag.add_op(self._interactive_query_node)
+        if frontend_endpoint is not None:
+            self._graph_url = "ws://{0}/gremlin".format(frontend_endpoint)
             self._client = Client(self._graph_url, "g")
-        else:
-            self._graph_url = None
-            self._client = None
-
-    def __repr__(self):
-        return f"graphscope.InteractiveQuery <{self._graph_url}>"
-
-    @property
-    def object_id(self):
-        """Get the vineyard object id of graph.
-
-        Returns:
-            str: object id
-        """
-        return self._object_id
 
     @property
     def graph_url(self):
@@ -100,10 +143,6 @@ class InteractiveQuery(object):
     @error_msg.setter
     def error_msg(self, error_msg):
         self._error_msg = error_msg
-
-    def set_frontend(self, front_ip, front_port):
-        self._graph_url = "ws://%s:%d/gremlin" % (front_ip, front_port)
-        self._client = Client(self._graph_url, "g")
 
     def closed(self):
         """Return if the current instance is closed."""

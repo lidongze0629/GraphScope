@@ -62,6 +62,7 @@ from graphscope.framework.operation import Operation
 from graphscope.framework.utils import decode_dataframe
 from graphscope.framework.utils import decode_numpy
 from graphscope.interactive.query import InteractiveQuery
+from graphscope.interactive.query import InteractiveQueryDAGNode
 from graphscope.interactive.query import InteractiveQueryStatus
 from graphscope.proto import graph_def_pb2
 from graphscope.proto import message_pb2
@@ -119,6 +120,17 @@ class _FetchHandler(object):
         # update graph flied from graph_def
         g.update_from_graph_def(op_result.graph_def)
         return g
+
+    def _rebuild_interactive_query(
+        self, seq, op: Operation, op_result: op_def_pb2.OpResult
+    ):
+        # get interactive query dag node as base
+        interactive_query_node = self._fetches[seq]
+        # construct interactive query
+        interactive_query = InteractiveQuery(
+            interactive_query_node, op_result.result.decode("utf-8")
+        )
+        return interactive_query
 
     def _rebuild_app(self, seq, op: Operation, op_result: op_def_pb2.OpResult):
         from graphscope.framework.app import App
@@ -178,6 +190,8 @@ class _FetchHandler(object):
                             or op.type == types_pb2.GRAPH_TO_NUMPY
                         ):
                             rets.append(decode_numpy(op_result.result))
+                    if op.output_types == types_pb2.INTERACTIVE_QUERY:
+                        rets.append(self._rebuild_interactive_query(seq, op, op_result))
                     if op.output_types == types_pb2.NULL_OUTPUT:
                         rets.append(None)
                     break
@@ -1087,37 +1101,44 @@ class Session(object):
     def gremlin(self, graph, engine_params=None):
         """Get a interactive engine handler to execute gremlin queries.
 
-        Note that this method will be executed implicitly when a property graph created
-        and cache a instance of InteractiveQuery in session if `initializing_interactive_engine`
-        is True. If you want to create a new instance under the same graph by different params,
-        you should close the instance first.
+        It will return a instance of :class:`graphscope.interactive.query.InteractiveQueryDAGNode`,
+        that will be evaluated by :method:`sess.run` in eager mode.
+
+        Note that this method will be executed implicitly in eager mode when a property graph created
+        and cache a instance of InteractiveQuery in session if `initializing_interactive_engine` is True.
+        If you want to create a new instance under the same graph by different params, you should close
+        the instance first.
 
         .. code:: python
 
-            >>> # close and recreate InteractiveQuery.
+            >>> # close and recreate InteractiveQuery in eager mode.
             >>> interactive_query = sess.gremlin(g)
             >>> interactive_query.close()
             >>> interactive_query = sess.gremlin(g, engine_params={"xxx":"xxx"})
 
-
         Args:
-            graph (:class:`Graph`): Use the graph to create interactive instance.
+            graph (:class:`graphscope.framework.graph.GraphDAGNode`):
+                The graph to create interactive instance.
             engine_params (dict, optional): Configure startup parameters of interactive engine.
                 You can also configure this param by `graphscope.set_option(engine_params={})`.
                 See a list of configurable keys in
                 `interactive_engine/deploy/docker/dockerfile/executor.vineyard.properties`
 
         Raises:
-            InvalidArgumentError: :code:`graph` is not a property graph or unloaded.
+            InvalidArgumentError:
+                - :code:`graph` is not a property graph.
+                - :code:`graph` is unloaded in eager mode.
 
         Returns:
-            :class:`InteractiveQuery`
+            :class:`graphscope.interactive.query.InteractiveQueryDAGNode`:
+                InteractiveQuery to execute gremlin queries, evaluated in eager mode.
         """
 
-        # self._interactive_instance_dict[graph.vineyard_id] will be None if
-        # InteractiveQuery closed
+        # Interactive query instance won't add to self._interactive_instance_dict in lazy mode.
+        # self._interactive_instance_dict[graph.vineyard_id] will be None if InteractiveQuery closed
         if (
-            graph.vineyard_id in self._interactive_instance_dict
+            self.eager()
+            and graph.vineyard_id in self._interactive_instance_dict
             and self._interactive_instance_dict[graph.vineyard_id] is not None
         ):
             interactive_query = self._interactive_instance_dict[graph.vineyard_id]
@@ -1137,41 +1158,31 @@ class Session(object):
                             interactive_query.error_msg
                         )
 
-        if not graph.loaded():
-            raise InvalidArgumentError("The graph has already been unloaded")
         if not graph.graph_type == graph_def_pb2.ARROW_PROPERTY:
             raise InvalidArgumentError("The graph should be a property graph.")
 
-        interactive_query = InteractiveQuery(session=self, object_id=graph.vineyard_id)
-        self._interactive_instance_dict[graph.vineyard_id] = interactive_query
-
-        if engine_params is not None:
-            engine_params = {
-                str(key): str(value) for key, value in engine_params.items()
-            }
-        else:
-            engine_params = {}
+        if self.eager():
+            if not graph.loaded():
+                raise InvalidArgumentError("The graph has already been unloaded")
+            # cache the instance of interactive query in eager mode
+            interactive_query = InteractiveQuery()
+            self._interactive_instance_dict[graph.vineyard_id] = interactive_query
 
         try:
-            response = self._grpc_client.create_interactive_engine(
-                object_id=graph.vineyard_id,
-                schema_path=graph.schema_path,
-                gremlin_server_cpu=gs_config.k8s_gie_gremlin_server_cpu,
-                gremlin_server_mem=gs_config.k8s_gie_gremlin_server_mem,
-                engine_params=engine_params,
+            _wrapper = self._wrapper(
+                InteractiveQueryDAGNode(self, graph, engine_params)
             )
         except Exception as e:
-            interactive_query.status = InteractiveQueryStatus.Failed
-            interactive_query.error_msg = str(e)
+            if self.eager():
+                interactive_query.status = InteractiveQueryStatus.Failed
+                interactive_query.error_msg = str(e)
             raise InteractiveEngineInternalError(str(e)) from e
         else:
-            interactive_query.set_frontend(
-                front_ip=response.frontend_host, front_port=response.frontend_port
-            )
-            interactive_query.status = InteractiveQueryStatus.Running
-            graph._attach_interactive_instance(interactive_query)
-
-        return interactive_query
+            if self.eager():
+                interactive_query = _wrapper
+                interactive_query.status = InteractiveQueryStatus.Running
+                graph._attach_learning_instance(interactive_query)
+        return _wrapper
 
     def learning(self, graph, nodes=None, edges=None, gen_labels=None):
         """Start a graph learning engine.

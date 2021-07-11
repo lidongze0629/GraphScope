@@ -68,6 +68,7 @@ enum OutputType {
   DATAFRAME = 5;
   VINEYARD_TENSOR = 6;
   VINEYARD_DATAFRAME = 7;
+  INTERACTIVE_QUERY = 8;
   NULL_OUTPUT = 101;
 };
 
@@ -99,6 +100,7 @@ enum OperationType {
 
   CREATE_INTERACTIVE_QUERY = 31;  // interactive query
   SUBGRAPH = 32;  // subgraph in interactive query
+  GREMLIN_QUERY = 33;  // queries on gremlin engine
 
   CREATE_LEARNING = 41;  // learning graph
 

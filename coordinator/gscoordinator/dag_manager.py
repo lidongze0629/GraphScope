@@ -48,6 +48,12 @@ class DAGManager(object):
         types_pb2.UNLOAD_APP,  # need loaded app information
     ]
 
+    _interactive_engine_split_op = [
+        types_pb2.CREATE_INTERACTIVE_QUERY,
+        types_pb2.SUBGRAPH,
+        types_pb2.GREMLIN_QUERY,
+    ]
+
     def __init__(self, dag_def: op_def_pb2.DagDef):
         self._dag_def = dag_def
         self._split_dag_def_queue = queue.Queue()
@@ -61,6 +67,11 @@ class DAGManager(object):
                     self._split_dag_def_queue.put((split_dag_def_for, split_dag_def))
                 split_dag_def = op_def_pb2.DagDef()
                 split_dag_def_for = GSEngine.analytical_engine
+            if op.op in self._interactive_engine_split_op:
+                if len(split_dag_def.op) > 0:
+                    self._split_dag_def_queue.put((split_dag_def_for, split_dag_def))
+                split_dag_def = op_def_pb2.DagDef()
+                split_dag_def_for = GSEngine.interactive_engine
             split_dag_def.op.extend([copy.deepcopy(op)])
         if len(split_dag_def.op) > 0:
             self._split_dag_def_queue.put((split_dag_def_for, split_dag_def))

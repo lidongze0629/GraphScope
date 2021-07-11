@@ -426,6 +426,43 @@ class CoordinatorServiceServicer(
                     self._object_manager.pop(op.attr[types_pb2.APP_NAME].s.decode())
         return response
 
+    def run_on_interactive_engine(
+        self, session_id, dag_def: op_def_pb2.DagDef, op_results: list
+    ):
+        for op in dag_def.op:
+            self._key_to_op[op.key] = op
+            try:
+                op_pre_process(op, self._op_result_pool, self._key_to_op)
+            except Exception as e:
+                error_msg = (
+                    "Failed to pre process op {0} with error message {1}".format(
+                        op, str(e)
+                    )
+                )
+                logger.error(error_msg)
+                return self._make_response(
+                    message_pb2.RunStepResponse,
+                    error_codes_pb2.COORDINATOR_INTERNAL_ERROR,
+                    error_msg,
+                    full_exception=pickle.dumps(e),
+                    results=op_results,
+                )
+            if op.op == types_pb2.CREATE_INTERACTIVE_QUERY:
+                op_result = self._create_interactive_instance(op)
+            op_results.append(op_result)
+            if op_result.code == error_codes_pb2.OK:
+                self._op_result_pool[op.key] = op_result
+            else:
+                return self._make_response(
+                    message_pb2.RunStepResponse,
+                    error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
+                    error_msg=op_result.error_msg,
+                    results=op_results,
+                )
+        return self._make_response(
+            message_pb2.RunStepResponse, error_codes_pb2.OK, results=op_results
+        )
+
     def RunStep(self, request, context):
         op_results = list()
         # split dag
@@ -435,6 +472,10 @@ class CoordinatorServiceServicer(
             run_dag_on, dag_def = next_dag
             if run_dag_on == GSEngine.analytical_engine:
                 ret = self.run_on_analytical_engine(
+                    request.session_id, dag_def, op_results
+                )
+            if run_dag_on == GSEngine.interactive_engine:
+                ret = self.run_on_interactive_engine(
                     request.session_id, dag_def, op_results
                 )
             if ret.status.code != error_codes_pb2.OK:
@@ -542,12 +583,19 @@ class CoordinatorServiceServicer(
 
         return self._make_response(message_pb2.CloseSessionResponse, error_codes_pb2.OK)
 
-    def CreateInteractiveInstance(self, request, context):
-        object_id = request.object_id
-        gremlin_server_cpu = request.gremlin_server_cpu
-        gremlin_server_mem = request.gremlin_server_mem
+    def _create_interactive_instance(self, op: op_def_pb2.OpDef):
+        object_id = op.attr[types_pb2.VINEYARD_ID].i
+        schema_path = op.attr[types_pb2.SCHEMA_PATH].s.decode()
+        gremlin_server_cpu = op.attr[types_pb2.GIE_GREMLIN_SERVER_CPU].f
+        gremlin_server_mem = op.attr[types_pb2.GIE_GREMLIN_SERVER_MEM].s.decode()
+        if types_pb2.GIE_GREMLIN_ENGINE_PARAMS in op.attr:
+            engine_params = json.load(
+                op.attr[types_pb2.GIE_GREMLIN_ENGINE_PARAMS].s.decode()
+            )
+        else:
+            engine_params = {}
 
-        with open(request.schema_path) as file:
+        with open(schema_path) as file:
             schema_json = file.read()
 
         params = {
@@ -567,8 +615,7 @@ class CoordinatorServiceServicer(
                 }
             )
             engine_params = [
-                "{}:{}".format(key, value)
-                for key, value in request.engine_params.items()
+                "{}:{}".format(key, value) for key, value in engine_params.items()
             ]
             params["engineParams"] = "'{}'".format(";".join(engine_params))
         else:
@@ -576,7 +623,7 @@ class CoordinatorServiceServicer(
             params.update(
                 {
                     "vineyardIpcSocket": self._launcher.vineyard_socket,
-                    "schemaPath": request.schema_path,
+                    "schemaPath": schema_path,
                     "zookeeperPort": str(self._launcher.zookeeper_port),
                 }
             )
@@ -587,19 +634,14 @@ class CoordinatorServiceServicer(
         res_json = json.load(create_res)
         error_code = res_json["errorCode"]
         if error_code == 0:
-            front_host = res_json["frontHost"]
-            front_port = res_json["frontPort"]
-            logger.info(
-                "build frontend %s:%d for graph %ld",
-                front_host,
-                front_port,
-                object_id,
+            frontend_endpoint = "{0}:{1}".format(
+                res_json["frontHost"], res_json["frontPort"]
             )
-            return message_pb2.CreateInteractiveResponse(
-                status=message_pb2.ResponseStatus(code=error_codes_pb2.OK),
-                frontend_host=front_host,
-                frontend_port=front_port,
-                object_id=object_id,
+            logger.info("build frontend %s for graph %ld", frontend_endpoint, object_id)
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.OK,
+                key=op.key,
+                result=frontend_endpoint.encode("utf-8"),
             )
         else:
             error_message = (
@@ -607,14 +649,10 @@ class CoordinatorServiceServicer(
                 % (object_id, error_code, res_json["errorMessage"])
             )
             logger.error(error_message)
-            return message_pb2.CreateInteractiveResponse(
-                status=message_pb2.ResponseStatus(
-                    code=error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
-                    error_msg=error_message,
-                ),
-                frontend_host="",
-                frontend_port=0,
-                object_id=object_id,
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
+                key=op.key,
+                error_msg=error_message,
             )
 
     def CloseInteractiveInstance(self, request, context):
