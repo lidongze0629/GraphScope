@@ -130,6 +130,7 @@ class _FetchHandler(object):
         interactive_query = InteractiveQuery(
             interactive_query_node, op_result.result.decode("utf-8")
         )
+        interactive_query.status = InteractiveQueryStatus.Running
         return interactive_query
 
     def _rebuild_app(self, seq, op: Operation, op_result: op_def_pb2.OpResult):
@@ -1180,7 +1181,6 @@ class Session(object):
         else:
             if self.eager():
                 interactive_query = _wrapper
-                interactive_query.status = InteractiveQueryStatus.Running
                 graph._attach_learning_instance(interactive_query)
         return _wrapper
 

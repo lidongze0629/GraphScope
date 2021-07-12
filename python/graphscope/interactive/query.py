@@ -116,9 +116,9 @@ class InteractiveQuery(object):
             self._interactive_query_node = interactive_query_node
             self._session = self._interactive_query_node.session
             # copy and set op evaluated
-            self._interactive_query_node = deepcopy(self._interactive_query_node)
+            self._interactive_query_node.op = deepcopy(self._interactive_query_node.op)
             self._interactive_query_node.evaluated = True
-            self._session.dag.add_op(self._interactive_query_node)
+            self._session.dag.add_op(self._interactive_query_node.op)
         if frontend_endpoint is not None:
             self._graph_url = "ws://{0}/gremlin".format(frontend_endpoint)
             self._client = Client(self._graph_url, "g")
