@@ -383,7 +383,6 @@ def _pre_process_for_create_interactive_query_op(op, op_result_pool, key_to_op):
     result.graph_def.extension.Unpack(vy_info)
     op.attr[types_pb2.VINEYARD_ID].CopyFrom(utils.i_to_attr(vy_info.vineyard_id))
     op.attr[types_pb2.SCHEMA_PATH].CopyFrom(utils.s_to_attr(vy_info.schema_path))
-    logger.info(op)
 
 
 # get `bind_app` runtime informarion in lazy mode

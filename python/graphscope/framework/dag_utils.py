@@ -902,3 +902,34 @@ def create_interactive_query(graph, engine_params, cpu, mem):
         output_types=types_pb2.INTERACTIVE_QUERY,
     )
     return op
+
+
+def gremlin_query(interactive_query, query, request_options=None):
+    """Execute a gremlin query.
+
+    Args:
+        interactive_query (:class:`graphscope.interactive.query.InteractiveQueryDAGNode`):
+            The GIE instance holds the graph that gremlin query on.
+        query (str):
+            Scripts that written in gremlin quering language.
+        request_options (dict, optional): gremlin request options. format:
+            {
+                "processor": "xxx",
+                "op": "xxx",
+                "args": {}
+            }
+    Returns:
+        An op to execute a gremlin query on the GIE instance.
+    """
+    config = {}
+    config[types_pb2.GIE_GREMLIN_QUERY] = utils.s_to_attr(query)
+    if request_options:
+        config[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS] = json.dump(request_options)
+    op = Operation(
+        interactive_query.session_id,
+        types_pb2.GREMLIN_QUERY,
+        config=config,
+        inputs=[interactive_query.op],
+        output_types=types_pb2.GREMLIN_RESULTS,
+    )
+    return op

@@ -30,6 +30,7 @@ from gremlin_python.process.anonymous_traversal import traversal
 from graphscope.config import GSConfig as gs_config
 from graphscope.framework.dag import DAGNode
 from graphscope.framework.dag_utils import create_interactive_query
+from graphscope.framework.dag_utils import gremlin_query
 from graphscope.framework.loader import Loader
 
 logger = logging.getLogger("graphscope")
@@ -88,6 +89,28 @@ class InteractiveQueryDAGNode(DAGNode):
         )
         # add op to dag
         self._session.dag.add_op(self._op)
+
+    def execute(self, query, request_options=None):
+        """Execute gremlin querying scripts.
+
+        Args:
+            query (str): Scripts that written in gremlin quering language.
+            request_options (dict, optional): gremlin request options. format:
+            {
+                "processor": "xxx",
+                "op": "xxx",
+                "args": {}
+            }
+
+        Returns:
+            :class:`graphscope.framework.context.ResultDAGNode`:
+                A result holds the gremlin result, evaluated in eager mode.
+        """
+        # avoid circular import
+        from graphscope.framework.context import ResultDAGNode
+
+        op = gremlin_query(self, query, request_options)
+        return ResultDAGNode(self, op)
 
 
 class InteractiveQuery(object):
