@@ -16,6 +16,8 @@
 # limitations under the License.
 #
 
+from gremlin_python.driver.client import Client
+
 
 class LibMeta(object):
     def __init__(self, key, type, lib_path):
@@ -31,6 +33,14 @@ class GraphMeta(object):
         self.vineyard_id = vineyard_id
         self.graph_def = graph_def
         self.schema_path = schema_path
+
+
+class InteractiveQueryClient(object):
+    def __init__(self, key, frontend_endpoint):
+        self.key = key
+        self.frontend_endpoint = frontend_endpoint
+        self.graph_url = "ws://{0}/gremlin".format(self.frontend_endpoint)
+        self.client = Client(self._graph_url, "g")
 
 
 class ObjectManager(object):

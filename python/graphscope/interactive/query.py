@@ -97,9 +97,7 @@ class InteractiveQueryDAGNode(DAGNode):
             query (str): Scripts that written in gremlin quering language.
             request_options (dict, optional): gremlin request options. format:
             {
-                "processor": "xxx",
-                "op": "xxx",
-                "args": {}
+                "engine": "gae"
             }
 
         Returns:
