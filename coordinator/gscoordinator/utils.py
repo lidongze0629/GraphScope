@@ -365,6 +365,8 @@ def op_pre_process(op, op_result_pool, key_to_op):
         _pre_process_for_unload_app_op(op, op_result_pool, key_to_op)
     if op.op == types_pb2.CREATE_INTERACTIVE_QUERY:
         _pre_process_for_create_interactive_query_op(op, op_result_pool, key_to_op)
+    if op.op == types_pb2.GREMLIN_QUERY:
+        _pre_process_for_gremlin_query_op(op, op_result_pool, key_to_op)
 
 
 def _pre_process_for_add_labels_op(op, op_result_pool, key_to_op):
@@ -372,6 +374,11 @@ def _pre_process_for_add_labels_op(op, op_result_pool, key_to_op):
     key_of_parent_op = op.parents[0]
     result = op_result_pool[key_of_parent_op]
     op.attr[types_pb2.GRAPH_NAME].CopyFrom(utils.s_to_attr(result.graph_def.key))
+
+
+def _pre_process_for_gremlin_query_op(op, op_result_pool, key_to_op):
+    assert len(op.parents) == 1
+    assert op.parents[0] in op_result_pool
 
 
 def _pre_process_for_create_interactive_query_op(op, op_result_pool, key_to_op):

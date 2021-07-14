@@ -59,6 +59,7 @@ from gscoordinator.dag_manager import DAGManager
 from gscoordinator.dag_manager import GSEngine
 from gscoordinator.launcher import LocalLauncher
 from gscoordinator.object_manager import GraphMeta
+from gscoordinator.object_manager import InteractiveQueryManager
 from gscoordinator.object_manager import LibMeta
 from gscoordinator.object_manager import ObjectManager
 from gscoordinator.utils import compile_app
@@ -449,9 +450,14 @@ class CoordinatorServiceServicer(
                 )
             if op.op == types_pb2.CREATE_INTERACTIVE_QUERY:
                 op_result = self._create_interactive_instance(op)
+            elif op.op == types_pb2.GREMLIN_QUERY:
+                op_result = self._execute_gremlin_query(op)
+            else:
+                logger.error("Unsupport op type: %s", str(op.op))
             op_results.append(op_result)
             if op_result.code == error_codes_pb2.OK:
-                self._op_result_pool[op.key] = op_result
+                if op.op not in [types_pb2.GREMLIN_QUERY]:
+                    self._op_result_pool[op.key] = op_result
             else:
                 return self._make_response(
                     message_pb2.RunStepResponse,
@@ -589,7 +595,7 @@ class CoordinatorServiceServicer(
         gremlin_server_cpu = op.attr[types_pb2.GIE_GREMLIN_SERVER_CPU].f
         gremlin_server_mem = op.attr[types_pb2.GIE_GREMLIN_SERVER_MEM].s.decode()
         if types_pb2.GIE_GREMLIN_ENGINE_PARAMS in op.attr:
-            engine_params = json.load(
+            engine_params = json.loads(
                 op.attr[types_pb2.GIE_GREMLIN_ENGINE_PARAMS].s.decode()
             )
         else:
@@ -638,6 +644,9 @@ class CoordinatorServiceServicer(
                 res_json["frontHost"], res_json["frontPort"]
             )
             logger.info("build frontend %s for graph %ld", frontend_endpoint, object_id)
+            self._object_manager.put(
+                op.key, InteractiveQueryManager(op.key, frontend_endpoint, object_id)
+            )
             return op_def_pb2.OpResult(
                 code=error_codes_pb2.OK,
                 key=op.key,
@@ -653,6 +662,32 @@ class CoordinatorServiceServicer(
                 code=error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
                 key=op.key,
                 error_msg=error_message,
+            )
+
+    def _execute_gremlin_query(self, op: op_def_pb2.OpDef):
+        message = op.attr[types_pb2.GIE_GREMLIN_QUERY_MESSAGE].s.decode()
+        request_options = None
+        if types_pb2.GIE_GREMLIN_REQUEST_OPTIONS in op.attr:
+            request_options = json.loads(
+                op.attr[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS].s.decode()
+            )
+        key_of_parent_op = op.parents[0]
+        gremlin_client = self._object_manager.get(key_of_parent_op)
+        try:
+            rlt = gremlin_client.submit(message, request_options=request_options)
+        except Exception as e:
+            error_message = "Gremlin query failed with error message {0}".format(str(e))
+            logger.error(error_message)
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.GREMLIN_QUERY_ERROR,
+                key=op.key,
+                error_msg=error_message,
+            )
+        else:
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.OK,
+                key=op.key,
+                result=pickle.dumps(rlt.one()),
             )
 
     def CloseInteractiveInstance(self, request, context):
@@ -768,6 +803,8 @@ class CoordinatorServiceServicer(
                     config[types_pb2.VINEYARD_ID] = attr_value_pb2.AttrValue(
                         i=obj.vineyard_id
                     )
+
+            # TODO dongze gie_manager to close maxgraph
 
             if unload_type:
                 dag_def = create_single_op_dag(unload_type, config)

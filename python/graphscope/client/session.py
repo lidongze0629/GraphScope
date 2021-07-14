@@ -26,6 +26,7 @@ import copy
 import json
 import logging
 import os
+import pickle
 import random
 import sys
 import threading
@@ -167,6 +168,8 @@ class _FetchHandler(object):
                         else:
                             # for nx Graph
                             rets.append(op_result.result.decode("utf-8"))
+                    if op.output_types == types_pb2.GREMLIN_RESULTS:
+                        rets.append(pickle.loads(op_result.result))
                     if op.output_types == types_pb2.GRAPH:
                         rets.append(self._rebuild_graph(seq, op, op_result))
                     if op.output_types == types_pb2.APP:

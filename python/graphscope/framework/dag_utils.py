@@ -892,7 +892,7 @@ def create_interactive_query(graph, engine_params, cpu, mem):
     config[types_pb2.GIE_GREMLIN_SERVER_MEM] = utils.s_to_attr(mem)
     if engine_params is not None:
         config[types_pb2.GIE_GREMLIN_ENGINE_PARAMS] = utils.s_to_attr(
-            json.dump(engine_params)
+            json.dumps(engine_params)
         )
     op = Operation(
         graph.session_id,
@@ -914,17 +914,17 @@ def gremlin_query(interactive_query, query, request_options=None):
             Scripts that written in gremlin quering language.
         request_options (dict, optional): gremlin request options. format:
             {
-                "processor": "xxx",
-                "op": "xxx",
-                "args": {}
+                "engine": "gae"
             }
     Returns:
         An op to execute a gremlin query on the GIE instance.
     """
     config = {}
-    config[types_pb2.GIE_GREMLIN_QUERY] = utils.s_to_attr(query)
+    config[types_pb2.GIE_GREMLIN_QUERY_MESSAGE] = utils.s_to_attr(query)
     if request_options:
-        config[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS] = json.dump(request_options)
+        config[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS] = utils.s_to_attr(
+            json.dumps(request_options)
+        )
     op = Operation(
         interactive_query.session_id,
         types_pb2.GREMLIN_QUERY,
