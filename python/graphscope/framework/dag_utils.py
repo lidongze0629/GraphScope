@@ -904,6 +904,26 @@ def create_interactive_query(graph, engine_params, cpu, mem):
     return op
 
 
+def close_interactive_query(interactive_query):
+    """Close the interactive instance.
+
+    Args:
+        interactive_query (:class:`graphscope.interactive.query.InteractiveQueryDAGNode`):
+            The GIE instance holds the graph that gremlin query on.
+    Returns:
+        An op to close the instance.
+    """
+    config = {}
+    op = Operation(
+        interactive_query.session_id,
+        types_pb2.CLOSE_INTERACTIVE_QUERY,
+        config=config,
+        inputs=[interactive_query.op],
+        output_types=types_pb2.NULL_OUTPUT,
+    )
+    return op
+
+
 def gremlin_query(interactive_query, query, request_options=None):
     """Execute a gremlin query.
 

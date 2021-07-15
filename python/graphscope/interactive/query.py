@@ -29,6 +29,7 @@ from gremlin_python.process.anonymous_traversal import traversal
 
 from graphscope.config import GSConfig as gs_config
 from graphscope.framework.dag import DAGNode
+from graphscope.framework.dag_utils import close_interactive_query
 from graphscope.framework.dag_utils import create_interactive_query
 from graphscope.framework.dag_utils import fetch_gremlin_result
 from graphscope.framework.dag_utils import gremlin_query
@@ -158,6 +159,16 @@ class InteractiveQueryDAGNode(DAGNode):
         """
         op = gremlin_query(self, query, request_options)
         return ResultSetDAGNode(self, op)
+
+    def close(self):
+        """Close interactive engine and release the resources.
+
+        Returns:
+            :class:`graphscope.interactive.query.ClosedInteractiveQuery`
+                Evaluated in eager mode.
+        """
+        op = close_interactive_query(self)
+        return ClosedInteractiveQuery(self._session, op)
 
 
 class InteractiveQuery(object):
@@ -321,3 +332,13 @@ class InteractiveQuery(object):
         if not self.closed():
             self._session._close_interactive_instance(self)
             self._status = InteractiveQueryStatus.Closed
+
+
+class ClosedInteractiveQuery(DAGNode):
+    """Closed interactive query node in a DAG."""
+
+    def __init__(self, session, op):
+        self._session = session
+        self._op = op
+        # add op to dag
+        self._session.dag.add_op(self._op)

@@ -456,6 +456,8 @@ class CoordinatorServiceServicer(
                 op_result = self._execute_gremlin_query(op)
             elif op.op == types_pb2.FETCH_GREMLIN_RESULT:
                 op_result = self._fetch_gremlin_result(op)
+            elif op.op == types_pb2.CLOSE_INTERACTIVE_QUERY:
+                op_result = self._close_interactive_instance(op)
             else:
                 logger.error("Unsupport op type: %s", str(op.op))
             op_results.append(op_result)
@@ -720,54 +722,47 @@ class CoordinatorServiceServicer(
                 code=error_codes_pb2.OK, key=op.key, result=pickle.dumps(rlt)
             )
 
-    def CloseInteractiveInstance(self, request, context):
-        object_id = request.object_id
-        if self._launcher_type == types_pb2.K8S:
-            manager_host = self._launcher.get_manager_host()
-            pod_name_list = ",".join(self._pods_list)
-            close_url = "%s/instance/close?graphName=%ld&podNameList=%s&containerName=%s&waitingForDelete=%s" % (
-                manager_host,
-                object_id,
-                pod_name_list,
-                ENGINE_CONTAINER,
-                str(self._launcher.waiting_for_delete()),
-            )
-        else:
-            manager_host = self._launcher.graph_manager_endpoint
-            close_url = "http://%s/instance/close_local?graphName=%ld" % (
-                manager_host,
-                object_id,
-            )
-        logger.info("Coordinator close interactive instance with url[%s]" % close_url)
+    def _close_interactive_instance(self, op: op_def_pb2.OpDef):
         try:
+            key_of_parent_op = op.parents[0]
+            gremlin_client = self._object_manager.get(key_of_parent_op)
+            object_id = gremlin_client.object_id
+            if self._launcher_type == types_pb2.K8S:
+                manager_host = self._launcher.get_manager_host()
+                pod_name_list = ",".join(self._pods_list)
+                close_url = "%s/instance/close?graphName=%ld&podNameList=%s&containerName=%s&waitingForDelete=%s" % (
+                    manager_host,
+                    object_id,
+                    pod_name_list,
+                    ENGINE_CONTAINER,
+                    str(self._launcher.waiting_for_delete()),
+                )
+            else:
+                manager_host = self._launcher.graph_manager_endpoint
+                close_url = "http://%s/instance/close_local?graphName=%ld" % (
+                    manager_host,
+                    object_id,
+                )
+            logger.info(
+                "Coordinator close interactive instance with url[%s]" % close_url
+            )
             close_res = urllib.request.urlopen(close_url).read()
+            gremlin_client.closed = True
         except Exception as e:
-            logger.error("Failed to close interactive instance: %s", e)
-            return message_pb2.CloseInteractiveResponse(
-                status=message_pb2.ResponseStatus(
-                    code=error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
-                    error_msg="Internal error during close interactive instance: %d, %s"
-                    % (400, e),
-                )
-            )
-        res_json = json.loads(close_res.decode("utf-8", errors="ignore"))
-        error_code = res_json["errorCode"]
-        if 0 == error_code:
-            return message_pb2.CloseInteractiveResponse(
-                status=message_pb2.ResponseStatus(code=error_codes_pb2.OK)
-            )
+            logger.error("Failed to close interactive instance: %s", str(e))
         else:
-            error_message = (
-                "Failed to close interactive instance for object id %ld with error code %d message %s"
-                % (object_id, error_code, res_json["errorMessage"])
-            )
-            logger.error("Failed to close interactive instance: %s", error_message)
-            return message_pb2.CloseInteractiveResponse(
-                status=message_pb2.ResponseStatus(
-                    code=error_codes_pb2.INTERACTIVE_ENGINE_INTERNAL_ERROR,
-                    error_msg=error_message,
+            res_json = json.loads(close_res.decode("utf-8", errors="ignore"))
+            error_code = res_json["errorCode"]
+            if error_code != 0:
+                error_message = (
+                    "Failed to close interactive instance for object id %ld with error code %d message %s"
+                    % (object_id, error_code, res_json["errorMessage"])
                 )
-            )
+                logger.error("Failed to close interactive instance: %s", error_message)
+        return op_def_pb2.OpResult(
+            code=error_codes_pb2.OK,
+            key=op.key,
+        )
 
     def CreateLearningInstance(self, request, context):
         logger.info(
@@ -833,8 +828,13 @@ class CoordinatorServiceServicer(
                     config[types_pb2.VINEYARD_ID] = attr_value_pb2.AttrValue(
                         i=obj.vineyard_id
                     )
-
-            # TODO dongze gie_manager to close maxgraph
+            elif obj_type == "gie_manager":
+                if not obj.closed:
+                    self._close_interactive_instance(
+                        op=op_def_pb2.OpDef(
+                            op=types_pb2.CLOSE_INTERACTIVE_QUERY, parents=[key]
+                        )
+                    )
 
             if unload_type:
                 dag_def = create_single_op_dag(unload_type, config)

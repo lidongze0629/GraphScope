@@ -103,6 +103,7 @@ enum OperationType {
   SUBGRAPH = 32;  // subgraph in interactive query
   GREMLIN_QUERY = 33;  // queries on gremlin engine
   FETCH_GREMLIN_RESULT = 34;
+  CLOSE_INTERACTIVE_QUERY = 35;
 
   CREATE_LEARNING = 41;  // learning graph
 

@@ -44,6 +44,7 @@ class InteractiveQueryManager(object):
         self.object_id = object_id
         self.graph_url = "ws://{0}/gremlin".format(self.frontend_endpoint)
         self.client = Client(self.graph_url, "g")
+        self.closed = False
 
     def submit(self, message, bindings=None, request_options=None):
         return self.client.submit(message, bindings, request_options)
