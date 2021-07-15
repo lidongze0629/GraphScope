@@ -30,6 +30,7 @@ from gremlin_python.process.anonymous_traversal import traversal
 from graphscope.config import GSConfig as gs_config
 from graphscope.framework.dag import DAGNode
 from graphscope.framework.dag_utils import create_interactive_query
+from graphscope.framework.dag_utils import fetch_gremlin_result
 from graphscope.framework.dag_utils import gremlin_query
 from graphscope.framework.loader import Loader
 
@@ -45,8 +46,57 @@ class InteractiveQueryStatus(Enum):
     Closed = 3
 
 
+class ResultSetDAGNode(DAGNode):
+    """A class represents a result set node in a DAG.
+
+    This is a wrapper for :class:`gremlin_python.driver.resultset.ResultSet`,
+    and you can get the result by :method:`one()` or :method:`all()`.
+    """
+
+    def __init__(self, dag_node, op):
+        self._session = dag_node.session
+        self._op = op
+        # add op to dag
+        self._session.dag.add_op(self._op)
+
+    def one(self):
+        """See details in :method:`gremlin_python.driver.resultset.ResultSet.one`"""
+        # avoid circular import
+        from graphscope.framework.context import ResultDAGNode
+
+        op = fetch_gremlin_result(self, "one")
+        return ResultDAGNode(self, op)
+
+    def all(self):
+        """See details in :method:`gremlin_python.driver.resultset.ResultSet.all`
+
+        Note that this method is equal to `ResultSet.all().result()`
+        """
+        # avoid circular import
+        from graphscope.framework.context import ResultDAGNode
+
+        op = fetch_gremlin_result(self, "all")
+        return ResultDAGNode(self, op)
+
+
+class ResultSet(object):
+    def __init__(self, result_set_node):
+        self._result_set_node = result_set_node
+        self._session = self._result_set_node.session
+        # copy and set op evaluated
+        self._result_set_node.op = deepcopy(self._result_set_node.op)
+        self._result_set_node.evaluated = True
+        self._session.dat.add_op(self._interactive_query_node.op)
+
+    def one(self):
+        return self._session._wrapper(self._result_set_node.one())
+
+    def all(self):
+        return self._session._wrapper(self._result_set_node.all())
+
+
 class InteractiveQueryDAGNode(DAGNode):
-    """A class represents a gremlin node in a DAG.
+    """A class represents an interactive query node in a DAG.
 
     The following example demonstrates its usage:
 
@@ -58,9 +108,11 @@ class InteractiveQueryDAGNode(DAGNode):
         >>> g = sess.g() # <graphscope.framework.graph.GraphDAGNode object>
         >>> ineractive = sess.gremlin(g)
         >>> print(ineractive) # <graphscope.interactive.query.InteractiveQueryDAGNode object>
-        >>> r = ineractive.execute("g.V()")
-        >>> print(r) # <graphscope.ramework.context.ResultDAGNode>
-        >>> print(sess.run(r).one())
+        >>> rs = ineractive.execute("g.V()")
+        >>> print(rs) # <graphscope.ineractive.query.ResultSetDAGNode object>
+        >>> r = rs.one()
+        >>> print(r) # <graphscope.framework.context.ResultDAGNode>
+        >>> print(sess.run(r))
         [2]
         >>> subgraph = ineractive.subgraph("xxx")
         >>> print(subgraph) # <graphscope.framework.graph.GraphDAGNode object>
@@ -104,11 +156,8 @@ class InteractiveQueryDAGNode(DAGNode):
             :class:`graphscope.framework.context.ResultDAGNode`:
                 A result holds the gremlin result, evaluated in eager mode.
         """
-        # avoid circular import
-        from graphscope.framework.context import ResultDAGNode
-
         op = gremlin_query(self, query, request_options)
-        return ResultDAGNode(self, op)
+        return ResultSetDAGNode(self, op)
 
 
 class InteractiveQuery(object):

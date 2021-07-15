@@ -34,6 +34,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from concurrent import futures
 from io import StringIO
 
@@ -59,6 +60,7 @@ from gscoordinator.dag_manager import DAGManager
 from gscoordinator.dag_manager import GSEngine
 from gscoordinator.launcher import LocalLauncher
 from gscoordinator.object_manager import GraphMeta
+from gscoordinator.object_manager import GremlinResultSet
 from gscoordinator.object_manager import InteractiveQueryManager
 from gscoordinator.object_manager import LibMeta
 from gscoordinator.object_manager import ObjectManager
@@ -452,11 +454,15 @@ class CoordinatorServiceServicer(
                 op_result = self._create_interactive_instance(op)
             elif op.op == types_pb2.GREMLIN_QUERY:
                 op_result = self._execute_gremlin_query(op)
+            elif op.op == types_pb2.FETCH_GREMLIN_RESULT:
+                op_result = self._fetch_gremlin_result(op)
             else:
                 logger.error("Unsupport op type: %s", str(op.op))
             op_results.append(op_result)
             if op_result.code == error_codes_pb2.OK:
-                if op.op not in [types_pb2.GREMLIN_QUERY]:
+                # don't record the results of these ops to avoid
+                # taking up too much memory in coordinator
+                if op.op not in [types_pb2.FETCH_GREMLIN_RESULT]:
                     self._op_result_pool[op.key] = op_result
             else:
                 return self._make_response(
@@ -684,10 +690,34 @@ class CoordinatorServiceServicer(
                 error_msg=error_message,
             )
         else:
+            self._object_manager.put(op.key, GremlinResultSet(op.key, rlt))
             return op_def_pb2.OpResult(
                 code=error_codes_pb2.OK,
                 key=op.key,
-                result=pickle.dumps(rlt.one()),
+            )
+
+    def _fetch_gremlin_result(self, op: op_def_pb2.OpDef):
+        fetch_result_type = op.attr[types_pb2.GIE_GREMLIN_FETCH_RESULT_TYPE].s.decode()
+        key_of_parent_op = op.parents[0]
+        result_set = self._object_manager.get(key_of_parent_op).result_set
+        try:
+            if fetch_result_type == "one":
+                rlt = result_set.one()
+            elif fetch_result_type == "all":
+                rlt = result_set.all().result()
+        except Exception as e:
+            error_message = "Fetch gremlin result failed with error message {0}".format(
+                e
+            )
+            logger.error(error_message)
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.GREMLIN_QUERY_ERROR,
+                key=op.key,
+                error_msg=error_message,
+            )
+        else:
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.OK, key=op.key, result=pickle.dumps(rlt)
             )
 
     def CloseInteractiveInstance(self, request, context):

@@ -52,6 +52,7 @@ class DAGManager(object):
         types_pb2.CREATE_INTERACTIVE_QUERY,
         types_pb2.SUBGRAPH,
         types_pb2.GREMLIN_QUERY,
+        types_pb2.FETCH_GREMLIN_RESULT,
     ]
 
     def __init__(self, dag_def: op_def_pb2.DagDef):

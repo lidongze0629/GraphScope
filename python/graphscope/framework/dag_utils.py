@@ -933,3 +933,26 @@ def gremlin_query(interactive_query, query, request_options=None):
         output_types=types_pb2.GREMLIN_RESULTS,
     )
     return op
+
+
+def fetch_gremlin_result(result_set, fetch_type="one"):
+    """Fetch the gremlin query result.
+
+    Args:
+        result_set (:class:`raphscope.interactive.query.ResultSetDAGNode`):
+            The instance holds the resultSet in coordinator that can fetch the gremlin result from.
+        fetch_type (str): "one" or "all". Defaults to "one".
+
+    Returns:
+        An op to fetch the gremlin result.
+    """
+    config = {}
+    config[types_pb2.GIE_GREMLIN_FETCH_RESULT_TYPE] = utils.s_to_attr(fetch_type)
+    op = Operation(
+        result_set.session_id,
+        types_pb2.FETCH_GREMLIN_RESULT,
+        config=config,
+        inputs=[result_set.op],
+        output_types=types_pb2.RESULTS,
+    )
+    return op

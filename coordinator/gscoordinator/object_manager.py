@@ -49,6 +49,13 @@ class InteractiveQueryManager(object):
         return self.client.submit(message, bindings, request_options)
 
 
+class GremlinResultSet(object):
+    def __init__(self, key, result_set):
+        self.key = key
+        self.type = "result_set"
+        self.result_set = result_set
+
+
 class ObjectManager(object):
     """Manage the objects hold by the coordinator."""
 
