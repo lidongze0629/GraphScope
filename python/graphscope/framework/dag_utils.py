@@ -936,6 +936,7 @@ def gremlin_query(interactive_query, query, request_options=None):
             {
                 "engine": "gae"
             }
+
     Returns:
         An op to execute a gremlin query on the GIE instance.
     """
@@ -951,6 +952,43 @@ def gremlin_query(interactive_query, query, request_options=None):
         config=config,
         inputs=[interactive_query.op],
         output_types=types_pb2.GREMLIN_RESULTS,
+    )
+    return op
+
+
+def gremlin_to_subgraph(
+    interactive_query, gremlin_script, request_options=None, oid_type="int64"
+):
+    """Create a subgraph from gremlin output.
+
+    Args:
+        interactive_query (:class:`graphscope.interactive.query.InteractiveQueryDAGNode`):
+            The GIE instance holds the graph that gremlin query on.
+        gremlin_script (str):
+            gremlin script to be executed.
+        request_options (dict, optional): gremlin request options. format:
+            {
+                "engine": "gae"
+            }
+        oid_type (str, optional):
+            Type of vertex original id. Defaults to "int64".
+
+    Returns:
+        An op to create the subgraph from gremlin script
+    """
+    config = {}
+    config[types_pb2.GIE_GREMLIN_QUERY_MESSAGE] = utils.s_to_attr(gremlin_script)
+    config[types_pb2.OID_TYPE] = utils.s_to_attr(oid_type)
+    if request_options:
+        config[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS] = utils.s_to_attr(
+            json.dumps(request_options)
+        )
+    op = Operation(
+        interactive_query.session_id,
+        types_pb2.SUBGRAPH,
+        config=config,
+        inputs=[interactive_query.op],
+        output_types=types_pb2.GRAPH,
     )
     return op
 

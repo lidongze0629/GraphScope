@@ -20,6 +20,7 @@
 
 import argparse
 import atexit
+import datetime
 import hashlib
 import json
 import logging
@@ -46,6 +47,12 @@ from gscoordinator.io_utils import StdoutWrapper
 # capture system stdout
 sys.stdout = StdoutWrapper(sys.stdout)
 
+from graphscope.framework.dag_utils import create_graph
+from graphscope.framework.graph_utils import assemble_op_config
+from graphscope.framework.graph_utils import normalize_parameter_edges
+from graphscope.framework.graph_utils import normalize_parameter_vertices
+from graphscope.framework.loader import Loader
+from graphscope.framework.utils import normalize_data_type_str
 from graphscope.proto import attr_value_pb2
 from graphscope.proto import coordinator_service_pb2_grpc
 from graphscope.proto import engine_service_pb2_grpc
@@ -458,6 +465,8 @@ class CoordinatorServiceServicer(
                 op_result = self._fetch_gremlin_result(op)
             elif op.op == types_pb2.CLOSE_INTERACTIVE_QUERY:
                 op_result = self._close_interactive_instance(op)
+            elif op.op == types_pb2.SUBGRAPH:
+                op_result = self._gremlin_to_subgraph(op)
             else:
                 logger.error("Unsupport op type: %s", str(op.op))
             op_results.append(op_result)
@@ -763,6 +772,77 @@ class CoordinatorServiceServicer(
             code=error_codes_pb2.OK,
             key=op.key,
         )
+
+    def _gremlin_to_subgraph(self, op: op_def_pb2.OpDef):
+        gremlin_script = op.attr[types_pb2.GIE_GREMLIN_QUERY_MESSAGE].s.decode()
+        oid_type = op.attr[types_pb2.OID_TYPE].s.decode()
+        request_options = None
+        if types_pb2.GIE_GREMLIN_REQUEST_OPTIONS in op.attr:
+            request_options = json.loads(
+                op.attr[types_pb2.GIE_GREMLIN_REQUEST_OPTIONS].s.decode()
+            )
+        key_of_parent_op = op.parents[0]
+        gremlin_client = self._object_manager.get(key_of_parent_op)
+
+        def load_subgraph(oid_type, name):
+            import vineyard
+
+            vertices = [Loader(vineyard.ObjectName("__%s_vertex_stream" % name))]
+            edges = [Loader(vineyard.ObjectName("__%s_edge_stream" % name))]
+            oid_type = normalize_data_type_str(oid_type)
+            v_labels = normalize_parameter_vertices(vertices)
+            e_labels = normalize_parameter_edges(edges)
+            config = assemble_op_config(
+                v_labels, e_labels, oid_type, directed=True, generate_eid=False
+            )
+            op = create_graph(
+                self._session_id, graph_def_pb2.ARROW_PROPERTY, attrs=config
+            )
+            dag = op_def_pb2.DagDef()
+            dag.op.extend([op.as_op_def()])
+            resp = self.run_on_analytical_engine(self._session_id, dag, [])
+            logger.info("subgraph has been loaded")
+            return resp.results[0]
+
+        # generate a random graph name
+        now_time = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        random_num = random.randint(0, 10000000)
+        graph_name = "%s_%s" % (str(now_time), str(random_num))
+
+        try:
+            # create a graph handle by name
+            gremlin_client.submit(
+                "g.createGraph('{0}').with('graphType', 'vineyard')".format(graph_name),
+                request_options=request_options,
+            ).all().result()
+
+            # start a thread to launch the graph
+            pool = futures.ThreadPoolExecutor()
+            subgraph_task = pool.submit(
+                load_subgraph,
+                oid_type,
+                graph_name,
+            )
+
+            # add subgraph vertices and edges
+            subgraph_script = "{0}.subgraph('{1}').outputVineyard('{2}')".format(
+                gremlin_script, graph_name, graph_name
+            )
+            gremlin_client.submit(
+                subgraph_script, request_options=request_options
+            ).all().result()
+
+            return subgraph_task.result()
+        except Exception as e:
+            error_message = "Failed to create subgraph from gremlin query with error message: {0}".format(
+                str(e)
+            )
+            logger.error(error_message)
+            return op_def_pb2.OpResult(
+                code=error_codes_pb2.GREMLIN_QUERY_ERROR,
+                key=op.key,
+                error_msg=error_message,
+            )
 
     def CreateLearningInstance(self, request, context):
         logger.info(

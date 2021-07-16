@@ -33,6 +33,7 @@ from graphscope.framework.dag_utils import close_interactive_query
 from graphscope.framework.dag_utils import create_interactive_query
 from graphscope.framework.dag_utils import fetch_gremlin_result
 from graphscope.framework.dag_utils import gremlin_query
+from graphscope.framework.dag_utils import gremlin_to_subgraph
 from graphscope.framework.loader import Loader
 
 logger = logging.getLogger("graphscope")
@@ -148,7 +149,7 @@ class InteractiveQueryDAGNode(DAGNode):
 
         Args:
             query (str): Scripts that written in gremlin quering language.
-            request_options (dict, optional): gremlin request options. format:
+            request_options (dict, optional): Gremlin request options. format:
             {
                 "engine": "gae"
             }
@@ -159,6 +160,33 @@ class InteractiveQueryDAGNode(DAGNode):
         """
         op = gremlin_query(self, query, request_options)
         return ResultSetDAGNode(self, op)
+
+    def subgraph(self, gremlin_script, request_options=None):
+        """Create a subgraph, which input is the result of the execution of `gremlin_script`.
+
+        Any gremlin script that output a set of edges can be used to contruct a subgraph.
+
+        Args:
+            gremlin_script (str): Gremlin script to be executed.
+            request_options (dict, optional): Gremlin request options. format:
+            {
+                "engine": "gae"
+            }
+
+        Returns:
+            :class:`graphscope.framework.graph.GraphDAGNode`:
+                A new graph constructed by the gremlin output, that also stored in vineyard.
+        """
+        # avoid circular import
+        from graphscope.framework.graph import GraphDAGNode
+
+        op = gremlin_to_subgraph(
+            self,
+            gremlin_script=gremlin_script,
+            request_options=request_options,
+            oid_type=self._graph._oid_type,
+        )
+        return GraphDAGNode(self._session, op)
 
     def close(self):
         """Close interactive engine and release the resources.
