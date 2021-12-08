@@ -1,16 +1,42 @@
 name: Build GraphScope Wheels on Linux
 
 on:
-  workflow_dispatch:
-  schedule:
-    # The notifications for scheduled workflows are sent to the user who
-    # last modified the cron syntax in the workflow file.
-    # Trigger the workflow at 03:00(CST) every day.
-    - cron:  '00 19 * * *'
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    paths-ignore:
+      - 'CONTRIBUTORS'
+      - 'LICENSE'
+      - 'NOTICE.txt'
+      - '**.md'
+      - '**.rst'
+      - 'docs/**'
+      - 'demo/**'
+      - 'scripts/**'
+      - 'tutorials/**'
+  pull_request:
+    paths-ignore:
+      - 'CONTRIBUTORS'
+      - 'LICENSE'
+      - 'NOTICE.txt'
+      - '**.md'
+      - '**.rst'
+      - 'docs/**'
+      - 'demo/**'
+      - 'scripts/**'
+      - 'tutorials/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/gss.yml'
+      - '.github/workflows/gaia.yml'
+      - '.github/workflows/gae.yml'
+      - '.github/workflows/nightly.yml'
+      - '.github/workflows/networkx-forward-algo-nightly.yml'
+      - '.github/workflows/build-graphscope-wheels-linux.yml'
+      - '.github/workflows/build-graphscope-wheels-maos.yml'
+
 
 jobs:
   build-wheels:
-    if: ${{ github.ref == 'refs/heads/main' && github.repository == 'alibaba/GraphScope' }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -53,31 +79,3 @@ jobs:
           client.tar.gz
           graphscope.tar.gz
         retention-days: 5
-
-  build-image:
-    if: ${{ github.ref == 'refs/heads/main' && github.repository == 'alibaba/GraphScope' }}
-    runs-on: ubuntu-20.04
-    needs: [build-wheels]
-
-    steps:
-    - uses: actions/checkout@v2.3.2
-      with:
-        submodules: true
-
-    - uses: actions/download-artifact@v2
-      with:
-        path: artifacts
-
-    - name: Add envs to GITHUB_ENV
-      run: |
-        short_sha=$(git rev-parse --short HEAD)
-        echo "SHORT_SHA=${short_sha}" >> $GITHUB_ENV
-
-    - name: Build GraphScope Image
-      run: |
-        cd ${GITHUB_WORKSPACE}/artifacts
-        tar -zxf ./wheel-${{ github.sha }}/client.tar.gz
-        tar -zxf ./wheel-${{ github.sha }}/graphscope.tar.gz
-
-        cd ${GITHUB_WORKSPACE}
-        sudo make graphscope-image
