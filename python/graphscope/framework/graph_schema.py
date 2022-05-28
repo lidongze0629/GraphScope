@@ -64,6 +64,9 @@ class Property:
     def __str__(self) -> str:
         return self.__repr__()
 
+    def to_dict(self) -> dict:
+        return {"name": self.name, "id": self.id, "type": graph_def_pb2.DataTypePb.Name(self.data_type)}
+
 
 Relation = namedtuple("Relation", "source destination")
 
@@ -124,6 +127,12 @@ class Label:
 
     def __str__(self) -> str:
         return self.__repr__()
+
+    def to_dict(self):
+        properties = []
+        for p in self.properties:
+            properties.append(p.to_dict())
+        return {"label": self.label, "properties": properties}
 
     @property
     def type_enum(self):
@@ -189,6 +198,14 @@ class EdgeLabel(Label):
         if self._relations:
             s += f"Relations: {self.relations}"
         return s
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        relations = []
+        for r in self._relations:
+            relations.append({"src_label": r.source, "dst_label": r.destination})
+        d.update({"relations": relations})
+        return d
 
 
 class GraphSchema:
@@ -345,6 +362,18 @@ class GraphSchema:
 
     def __str__(self):
         return self.__repr__()
+
+    def to_dict(self):
+        vertices = []
+        for entry in self._valid_vertex_labels():
+            vertices.append(entry.to_dict())
+        edges = []
+        for entry in self._valid_edge_labels():
+            edges.append(entry.to_dict())
+        return {"vertices": vertices, "edges": edges}
+
+    def to_json(self):
+        return json.dumps(self.to_json())
 
     @property
     def oid_type(self):
