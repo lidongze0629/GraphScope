@@ -164,3 +164,12 @@ graphscope-store:
 		--build-arg profile=${PROFILE} \
 		-t graphscope/graphscope-store:${VERSION} \
 		-f $(DOCKERFILES_DIR)/graphscope-store.Dockerfile .
+
+graphscope-store-with-httpserver:
+	cd $(WORKING_DIR)/.. && \
+	docker build \
+		--build-arg REGISTRY=$(REGISTRY) \
+		--build-arg BUILDER_VERSION=$(BUILDER_VERSION) \
+		--build-arg profile=${PROFILE} \
+		-t graphscope/graphscope-store:httpserver \
+		-f $(DOCKERFILES_DIR)/graphscope-store-with-httpserver.Dockerfile .
