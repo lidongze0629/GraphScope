@@ -43,10 +43,10 @@ VERSION := $(shell cat $(WORKING_DIR)/VERSION)
 .PHONY: all graphscope install clean
 
 # coordinator relys on client, which relys on learning
-all: coordinator analytical interactive
+all: coordinator analytical-java interactive
 graphscope: all
 
-install: analytical-install interactive-install learning-install coordinator
+install: analytical-java-install interactive-install learning-install coordinator
 	echo "Run the following command to correctly set environment variable"
 	echo "export GRAPHSCOPE_HOME=$(INSTALL_PREFIX)"
 

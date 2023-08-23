@@ -66,8 +66,9 @@ def _get_extra_data():  # noqa: C901
     #   1) graphscope: libs include *.so, runtime such as 'bin', and full-openmpi
     #   2) gs-coordinator: include python related code of gscoordinator
     #   3) gs-include: header files
-    #   4) gs-engine: other runtime info such as 'conf', and *.jar
+    #   4) gs-java: runtime info for running GAE java applications, e.g. giraph, graphx
     #   5) gs-apps: precompiled builtin applications
+    #   6) gs-engine: other runtime info such as 'conf', and *.jar
 
     def __unknown_platform(action, platform):
         raise RuntimeError(f"Unknown platform '{platform}' to {action}")
@@ -112,10 +113,23 @@ def _get_extra_data():  # noqa: C901
     #   {"source_dir": "package_dir"} or
     #   {"source_dir": (package_dir, [exclude_list])}
     if name == "graphscope":
-        # engine and lib
+        # engine and lib, except the gae-java's runtime
         data = {
-            f"{INSTALL_PREFIX}/bin/": os.path.join(RUNTIME_ROOT, "bin"),
-            f"{INSTALL_PREFIX}/lib/": os.path.join(RUNTIME_ROOT, "lib"),
+            f"{INSTALL_PREFIX}/bin/": (
+                os.path.join(RUNTIME_ROOT, "bin"),
+                [
+                    f"{INSTALL_PREFIX}/bin/graphx_runner",
+                    f"{INSTALL_PREFIX}/bin/run_graphx.sh",
+                ],
+            ),
+            f"{INSTALL_PREFIX}/lib/": (
+                os.path.join(RUNTIME_ROOT, "lib"),
+                [
+                    f"{INSTALL_PREFIX}/lib/grape-giraph-{version}-shaded.jar",
+                    f"{INSTALL_PREFIX}/lib/grape-graphx-{version}-shaded.jar",
+                    f"{INSTALL_PREFIX}/lib/grape-runtime-{version}-shaded.jar",
+                ],
+            ),
             f"{INSTALL_PREFIX}/lib64/": os.path.join(RUNTIME_ROOT, "lib64"),
             f"{__get_vineyard_prefix()}/lib/libvineyard_internal_registry.{__get_lib_suffix()}": os.path.join(
                 RUNTIME_ROOT, "lib"
@@ -131,6 +145,20 @@ def _get_extra_data():  # noqa: C901
         data = {
             f"{INSTALL_PREFIX}/conf/": os.path.join(RUNTIME_ROOT, "conf"),
             f"{INSTALL_PREFIX}/*.jar": os.path.join(RUNTIME_ROOT),
+        }
+    elif name == "gs-java":
+        data = {
+            f"{INSTALL_PREFIX}/bin/graphx_runner": os.path.join(RUNTIME_ROOT, "bin"),
+            f"{INSTALL_PREFIX}/bin/run_graphx.sh": os.path.join(RUNTIME_ROOT, "bin"),
+            f"{INSTALL_PREFIX}/lib/grape-giraph-{version}-shaded.jar": os.path.join(
+                RUNTIME_ROOT, "lib"
+            ),
+            f"{INSTALL_PREFIX}/lib/grape-graphx-{version}-shaded.jar": os.path.join(
+                RUNTIME_ROOT, "lib"
+            ),
+            f"{INSTALL_PREFIX}/lib/grape-runtime-{version}-shaded.jar": os.path.join(
+                RUNTIME_ROOT, "lib"
+            ),
         }
     elif name == "gs-include":
         data = {
@@ -339,6 +367,7 @@ def parsed_reqs():
             f"gs-engine == {version}",
             f"gs-include == {version}",
             f"gs-apps == {version}",
+            f"gs-java == {version}",
         ]
     else:
         return []

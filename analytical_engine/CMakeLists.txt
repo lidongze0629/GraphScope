@@ -518,7 +518,7 @@ if(ENABLE_JAVA_SDK)
     install(FILES "${GAE_JAVA_GIRAPH_JAR}" DESTINATION lib)
     install(FILES "${GAE_JAVA_JNI_LIB}" DESTINATION lib)
     install(FILES "${GAE_JAVA_DIR}/grape_jvm_opts" DESTINATION conf)
-    install(FILES "${GAE_JAVA_DIR}/run_graphx.sh" DESTINATION bin)
+    install(PROGRAMS "${GAE_JAVA_DIR}/run_graphx.sh" DESTINATION bin)
  endif()
 
 # Install binaries

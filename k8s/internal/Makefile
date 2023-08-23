@@ -86,9 +86,12 @@ graphscope-darwin-py3:
 		rm -rf build dist/*.whl || true && \
 		sudo strip -s $(WORKING_DIR)/../../analytical_engine/exported_symbols_osx.lds ${INSTALL_PREFIX}/bin/grape_engine || true && \
 		sudo strip ${INSTALL_PREFIX}/bin/gaia_executor && \
+		sudo strip ${INSTALL_PREFIX}/bin/graphx_runner && \
 		export DYLD_LIBRARY_PATH=/usr/local/lib:$$DYLD_LIBRARY_PATH && \
 		install_name_tool -add_rpath /usr/local/lib ${INSTALL_PREFIX}/bin/gaia_executor && \
 		package_name=gs-include python3 setup.py bdist_wheel --plat=macosx_${MACOS_WHEEL_VERSION}_${ARCH} && \
+		rm -rf build && \
+		package_name=gs-java python3 setup.py bdist_wheel --plat=macosx_${MACOS_WHEEL_VERSION}_${ARCH} && \
 		rm -rf build && \
 		package_name=gs-apps python3 setup.py bdist_wheel --plat=macosx_${MACOS_WHEEL_VERSION}_${ARCH} && \
 		rm -rf build && \
@@ -104,9 +107,6 @@ graphscope-darwin-py3:
 		done
 
 graphscope-manylinux2014-py3-nodocker:
-	# TODO(siyuan) Remove after newer wheel image are released
-	sudo yum install java-11-openjdk-devel -y && \
-	sudo yum remove java-1.8.0-openjdk-devel java-1.8.0-openjdk java-1.8.0-openjdk-headless -y && \
 	cd $(WORKING_DIR)/../.. && \
 		if [[ "${ARCH}" == "aarch64" ]]; then \
 			export AUDITWHEEL_PLAT=manylinux2014_${ARCH}; \
@@ -129,9 +129,12 @@ graphscope-manylinux2014-py3-nodocker:
 		rm -rf build dist/*.whl && \
 		sudo strip ${INSTALL_PREFIX}/bin/grape_engine && \
 		sudo strip ${INSTALL_PREFIX}/bin/gaia_executor && \
+		sudo strip ${INSTALL_PREFIX}/bin/graphx_runner && \
 		sudo strip ${INSTALL_PREFIX}/lib/*.so && \
 		(strip /tmp/gs/builtin/*/*.so || true) && \
 		package_name=gs-include python3 setup.py bdist_wheel && \
+		rm -rf build && \
+		package_name=gs-java python3 setup.py bdist_wheel && \
 		rm -rf build && \
 		package_name=gs-apps python3 setup.py bdist_wheel && \
 		rm -rf build && \
