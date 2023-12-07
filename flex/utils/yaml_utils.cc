@@ -15,6 +15,7 @@
  */
 
 #include "flex/utils/yaml_utils.h"
+#include "nlohmann/json.hpp"
 namespace gs {
 std::vector<std::string> get_yaml_files(const std::string& plugin_dir) {
   std::filesystem::path dir_path = plugin_dir;
@@ -29,11 +30,11 @@ std::vector<std::string> get_yaml_files(const std::string& plugin_dir) {
   return res_yaml_files;
 }
 
-Result<std::string> get_string_from_yaml(const std::string& file_path) {
+Result<std::string> get_json_string_from_yaml(const std::string& file_path) {
   try {
     YAML::Node config = YAML::LoadFile(file_path);
-    // output config to string
-    return get_string_from_yaml(config);
+    // output config to json string
+    return get_json_string_from_yaml(config);
   } catch (const YAML::BadFile& e) {
     return Result<std::string>(Status{StatusCode::IOError, e.what()});
   } catch (const YAML::ParserException& e) {
@@ -43,16 +44,62 @@ Result<std::string> get_string_from_yaml(const std::string& file_path) {
   }
 }
 
-Result<std::string> get_string_from_yaml(const YAML::Node& node) {
+nlohmann::json convert_yaml_node_to_json(const YAML::Node& node) {
+  nlohmann::json json;
   try {
-    // output config to string
-    YAML::Emitter emitter;
-    emitter << YAML::DoubleQuoted << YAML::Flow << YAML::BeginSeq << node;
-    std::string json(emitter.c_str() + 1);
-    return Result<std::string>(Status{StatusCode::OK, "Success"}, json);
+    switch (node.Type()) {
+    case YAML::NodeType::Null: {
+      json = nullptr;
+      break;
+    }
+    case YAML::NodeType::Scalar: {
+      try {
+        json = node.as<int>();
+      } catch (const YAML::BadConversion& e) {
+        try {
+          json = node.as<double>();
+        } catch (const YAML::BadConversion& e) {
+          try {
+            json = node.as<bool>();
+          } catch (const YAML::BadConversion& e) {
+            json = node.as<std::string>();
+          }
+        }
+      }
+      break;
+    }
+    case YAML::NodeType::Sequence: {
+      for (const auto& item : node) {
+        json.push_back(convert_yaml_node_to_json(item));
+      }
+      break;
+    }
+    case YAML::NodeType::Map:
+      for (const auto& pair : node) {
+        json[pair.first.as<std::string>()] =
+            convert_yaml_node_to_json(pair.second);
+      }
+      break;
+    default:
+      throw std::runtime_error("Unsupported YAML node type" + node.Type());
+      break;
+    }
+  } catch (const YAML::BadConversion& e) {
+    throw Status{StatusCode::IOError, e.what()};
+  }
+  return json;
+}
+
+Result<std::string> get_json_string_from_yaml(const YAML::Node& node) {
+  try {
+    nlohmann::json json = convert_yaml_node_to_json(node);
+    return json.dump(2);  // 2 indents
+  } catch (const YAML::BadConversion& e) {
+    return Result<std::string>(Status{StatusCode::IOError, e.what()});
+  } catch (const std::runtime_error& e) {
+    return Result<std::string>(Status{StatusCode::IOError, e.what()});
   } catch (...) {
-    return Result<std::string>(
-        Status{StatusCode::IOError, "Failed to convert yaml to json"});
+    return Result<std::string>(Status{StatusCode::IOError, "Unknown error"});
   }
 }
 }  // namespace gs

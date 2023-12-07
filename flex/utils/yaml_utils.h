@@ -28,9 +28,9 @@ namespace gs {
 
 std::vector<std::string> get_yaml_files(const std::string& plugin_dir);
 
-Result<std::string> get_string_from_yaml(const std::string& file_path);
+Result<std::string> get_json_string_from_yaml(const std::string& file_path);
 
-Result<std::string> get_string_from_yaml(const YAML::Node& yaml_node);
+Result<std::string> get_json_string_from_yaml(const YAML::Node& yaml_node);
 
 namespace config_parsing {
 template <typename T>

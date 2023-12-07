@@ -64,7 +64,7 @@ class WorkDirManipulator {
    * @brief Create a graph with a given name and config.
    * @param boost_ptree The config of the graph.
    */
-  static gs::Result<seastar::sstring> CreateGraph(const YAML::Node& yaml_node);
+  static gs::Result<seastar::sstring> CreateGraph(YAML::Node& yaml_node);
 
   /**
    * @brief Get a graph with a given name.

@@ -1,5 +1,7 @@
 name: modern_graph # then must have a modern dir under ${data} directory
 store_type: mutable_csr  # v6d, groot, gart
+stored_procedures:
+  directory: plugins
 schema:
   vertex_types:
     - type_id: 0

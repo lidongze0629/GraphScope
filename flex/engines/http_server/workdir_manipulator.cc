@@ -46,7 +46,7 @@ std::string WorkDirManipulator::GetRunningGraph() {
 
 // GraphName can be specified in the config file or in the argument.
 gs::Result<seastar::sstring> WorkDirManipulator::CreateGraph(
-    const YAML::Node& yaml_config) {
+    YAML::Node& yaml_config) {
   // First check graph exits
   if (!yaml_config["name"]) {
     return gs::Result<seastar::sstring>(
@@ -55,6 +55,13 @@ gs::Result<seastar::sstring> WorkDirManipulator::CreateGraph(
         seastar::sstring("Graph name is not specified"));
   }
   auto graph_name = yaml_config["name"].as<std::string>();
+  // Set some default values before parsing and dump to file
+  if (!yaml_config["stored_procedures"]) {
+    // create map for stored_procedures
+    yaml_config["stored_procedures"] = YAML::Node(YAML::NodeType::Map);
+    yaml_config["stored_procedures"]["directory"] =
+        WorkDirManipulator::GRAPH_PLUGIN_DIR_NAME;
+  }
 
   if (is_graph_exist(graph_name)) {
     return gs::Result<seastar::sstring>(
@@ -98,7 +105,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetGraphSchemaString(
         "Graph schema file is expected, but not exists: " + schema_file));
   }
   // read schema file and output to string
-  auto schema_str_res = gs::get_string_from_yaml(schema_file);
+  auto schema_str_res = gs::get_json_string_from_yaml(schema_file);
   if (!schema_str_res.ok()) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::NotExists,
@@ -178,7 +185,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::ListGraphs() {
       }
     }
   }
-  auto json_str = gs::get_string_from_yaml(yaml_list);
+  auto json_str = gs::get_json_string_from_yaml(yaml_list);
   if (!json_str.ok()) {
     return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::InternalError,
@@ -408,10 +415,13 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
     }
   }
   // yaml_list to string
-  YAML::Emitter emitter;
-  emitter << plugin_node;
-  auto str = emitter.c_str();
-  return gs::Result<seastar::sstring>(std::move(str));
+  auto str = gs::get_json_string_from_yaml(plugin_node);
+  if (!str.ok()) {
+    return gs::Result<seastar::sstring>(gs::Status(
+        gs::StatusCode::InternalError,
+        "Fail to convert yaml to json: " + str.status().error_message()));
+  }
+  return gs::Result<seastar::sstring>(str.value());
 }
 
 seastar::future<seastar::sstring> WorkDirManipulator::CreateProcedure(
@@ -1060,7 +1070,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
     }
   }
   // dump to json
-  auto res = gs::get_string_from_yaml(yaml_list);
+  auto res = gs::get_json_string_from_yaml(yaml_list);
   if (!res.ok()) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
@@ -1096,7 +1106,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
     }
   }
   // dump to json
-  auto res = gs::get_string_from_yaml(yaml_list);
+  auto res = gs::get_json_string_from_yaml(yaml_list);
   if (!res.ok()) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
@@ -1119,10 +1129,14 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_procedure_yaml(
   try {
     auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
     // dump to json
-    YAML::Emitter emitter;
-    emitter << procedure_yaml_node;
-    auto str = emitter.c_str();
-    return gs::Result<seastar::sstring>(std::move(str));
+    auto str = gs::get_json_string_from_yaml(procedure_yaml_node);
+    if (!str.ok()) {
+      return gs::Result<seastar::sstring>(
+          gs::Status(gs::StatusCode::InternalError,
+                     "Fail to dump procedure yaml to json, error: " +
+                         str.status().error_message()));
+    }
+    return gs::Result<seastar::sstring>(std::move(str.value()));
   } catch (const std::exception& e) {
     LOG(ERROR) << "Fail to load procedure yaml file: " << procedure_yaml_file
                << ", error: " << e.what();
@@ -1242,9 +1256,13 @@ gs::Result<seastar::sstring> WorkDirManipulator::disable_procedure_on_graph(
 gs::Result<seastar::sstring> WorkDirManipulator::dump_yaml_to_file(
     const YAML::Node& yaml_node, const std::string& procedure_yaml_file) {
   try {
-    YAML::Emitter emitter;
-    emitter << yaml_node;
-    auto str = emitter.c_str();
+    auto str = gs::get_json_string_from_yaml(yaml_node);
+    if (!str.ok()) {
+      return gs::Result<seastar::sstring>(
+          gs::Status(gs::StatusCode::InternalError,
+                     "Fail to dump yaml to string, error: " +
+                         str.status().error_message()));
+    }
     std::ofstream fout(procedure_yaml_file);
     if (!fout.is_open()) {
       return gs::Result<seastar::sstring>(
@@ -1252,7 +1270,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::dump_yaml_to_file(
                      "Fail to open file: " + procedure_yaml_file +
                          ", error: " + std::string(std::strerror(errno))));
     }
-    fout << str;
+    fout << str.value();
     fout.close();
   } catch (const std::exception& e) {
     return gs::Result<seastar::sstring>(
