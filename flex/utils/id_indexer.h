@@ -221,8 +221,6 @@ class LFIndexer {
       keys_ = new TypedColumn<uint64_t>(StorageStrategy::kMem);
     } else if (type == PropertyType::kUInt32) {
       keys_ = new TypedColumn<uint32_t>(StorageStrategy::kMem);
-    } else if (type == PropertyType::kStringMap) {
-      keys_ = new StringMapColumn<uint8_t>(StorageStrategy::kMem);
     } else if (type.type_enum == impl::PropertyTypeImpl::kVarChar) {
       keys_ = new StringColumn(StorageStrategy::kMem,
                                type.additional_type_info.max_length);
@@ -319,7 +317,9 @@ class LFIndexer {
   }
 
   bool get_index(const Any& oid, INDEX_T& ret) const {
-    assert(oid.type == get_type());
+    if (oid.type != get_type()) {
+      return false;
+    }
     size_t index =
         hash_policy_.index_for_hash(hasher_(oid), num_slots_minus_one_);
     static constexpr INDEX_T sentinel = std::numeric_limits<INDEX_T>::max();
@@ -362,6 +362,19 @@ class LFIndexer {
     keys_->resize(num_elements + (num_elements >> 2));
 
     indices_size_ = indices_.size();
+  }
+
+  void open_in_memory(const std::string& name) {
+    if (std::filesystem::exists(name + ".meta")) {
+      load_meta(name + ".meta");
+    } else {
+      num_elements_.store(0);
+    }
+    keys_->open_in_memory(name + ".keys");
+    indices_.open_in_memory(name + ".indices");
+    indices_size_ = indices_.size();
+    size_t num_elements = num_elements_.load();
+    keys_->resize(num_elements + (num_elements >> 2));
   }
 
   void dump(const std::string& name, const std::string& snapshot_dir) {
