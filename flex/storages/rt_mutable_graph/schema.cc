@@ -1006,11 +1006,13 @@ bool Schema::has_edge_label(const std::string& src_label,
   return eprop_names_.find(e_label_id) != eprop_names_.end();
 }
 
-Schema Schema::LoadFromYaml(const std::string& schema_config) {
+Result<Schema> Schema::LoadFromYaml(const std::string& schema_config) {
   Schema schema;
   if (!schema_config.empty() && std::filesystem::exists(schema_config)) {
     if (!config_parsing::parse_schema_config_file(schema_config, schema)) {
-      LOG(FATAL) << "Failed to parse schema config file: " << schema_config;
+      LOG(ERROR) << "Failed to parse schema config file: " << schema_config;
+      return Result<Schema>(
+          Status(StatusCode::InvalidSchema, "Failed to parse schema"), schema);
     }
   }
   return schema;

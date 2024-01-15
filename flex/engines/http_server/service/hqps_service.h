@@ -39,13 +39,15 @@ class HQPSService {
   // start both admin and query service.
   void init(uint32_t num_shards, uint16_t admin_port, uint16_t query_port,
             bool dpdk_mode, bool enable_thread_resource_pool,
-            unsigned external_thread_num);
+            unsigned external_thread_num, std::string engine_config_path);
 
   bool is_initialized() const;
 
   bool is_running() const;
 
   uint16_t get_query_port() const;
+
+  std::string get_engine_config_path() const;
 
   gs::Result<seastar::sstring> service_status();
 
@@ -70,6 +72,7 @@ class HQPSService {
   std::unique_ptr<hqps_http_handler> query_hdl_;
   std::atomic<bool> running_{false};
   std::atomic<bool> initialized_{false};
+  std::string engine_config_path_;
 };
 
 }  // namespace server

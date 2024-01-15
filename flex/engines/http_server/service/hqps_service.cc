@@ -40,7 +40,8 @@ void HQPSService::init(uint32_t num_shards, uint16_t query_port, bool dpdk_mode,
 void HQPSService::init(uint32_t num_shards, uint16_t admin_port,
                        uint16_t query_port, bool dpdk_mode,
                        bool enable_thread_resource_pool,
-                       unsigned external_thread_num) {
+                       unsigned external_thread_num,
+                       std::string engine_config_path) {
   if (initialized_.load(std::memory_order_relaxed)) {
     std::cerr << "High QPS service has been already initialized!" << std::endl;
     return;
@@ -50,6 +51,7 @@ void HQPSService::init(uint32_t num_shards, uint16_t admin_port,
   query_hdl_ = std::make_unique<hqps_http_handler>(query_port);
   admin_hdl_ = std::make_unique<admin_http_handler>(admin_port);
   initialized_.store(true);
+  engine_config_path_ = engine_config_path;
   gs::init_cpu_usage_watch();
 }
 
@@ -72,6 +74,10 @@ uint16_t HQPSService::get_query_port() const {
     return query_hdl_->get_port();
   }
   return 0;
+}
+
+std::string HQPSService::get_engine_config_path() const {
+  return engine_config_path_;
 }
 
 gs::Result<seastar::sstring> HQPSService::service_status() {

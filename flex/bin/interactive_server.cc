@@ -103,12 +103,13 @@ std::tuple<uint32_t, uint32_t, uint32_t, std::string> parse_from_server_config(
     LOG(FATAL) << "Fail to find http_service configuration";
   }
   auto default_graph_node = config["default_graph"];
+  std::string default_graph;
   if (default_graph_node) {
-    auto default_graph = default_graph_node.as<std::string>();
-    return std::make_tuple(shard_num, admin_port, query_port, default_graph);
+    default_graph = default_graph_node.as<std::string>();
   } else {
-    LOG(FATAL) << "Fail to find default_graph configuration";
+    LOG(WARNING) << "Fail to find default_graph configuration";
   }
+  return std::make_tuple(shard_num, admin_port, query_port, default_graph);
 }
 
 void init_codegen_proxy(const bpo::variables_map& vm,
@@ -132,14 +133,17 @@ void init_codegen_proxy(const bpo::variables_map& vm,
 
 void initWorkspace(const std::string workspace, int32_t thread_num,
                    const std::string& default_graph) {
-  // If workspace directory not exists, create.
-
   if (!std::filesystem::exists(workspace)) {
     std::filesystem::create_directory(workspace);
   }
   // Create subdirectories
-  std::filesystem::create_directory(workspace + "/" +
-                                    server::WorkDirManipulator::DATA_DIR_NAME);
+  auto data_dir_path =
+      workspace + "/" + server::WorkDirManipulator::DATA_DIR_NAME;
+  if (!std::filesystem::exists(data_dir_path)) {
+    std::filesystem::create_directory(data_dir_path);
+  }
+
+  server::WorkDirManipulator::ClearRunningGraph();
 
   LOG(INFO) << "Finish creating workspace directory " << workspace;
   // Get current executable path
@@ -149,28 +153,34 @@ void initWorkspace(const std::string workspace, int32_t thread_num,
   VLOG(1) << "Finish init workspace";
 
   auto& db = gs::GraphDB::get();
-  auto schema_path =
-      server::WorkDirManipulator::GetGraphSchemaPath(default_graph);
-  gs::Schema schema = gs::Schema::LoadFromYaml(schema_path);
-  auto data_dir_res =
-      server::WorkDirManipulator::GetDataDirectory(default_graph);
-  if (!data_dir_res.ok()) {
-    LOG(FATAL) << "Fail to get data directory for default graph: "
-               << data_dir_res.status().error_message();
+  if (default_graph.empty()) {
+    LOG(WARNING) << "No Default graph is specified";
+  } else {
+    auto schema_path =
+        server::WorkDirManipulator::GetGraphSchemaPath(default_graph);
+    auto schema_res = gs::Schema::LoadFromYaml(schema_path);
+    if (!schema_res.ok()) {
+      LOG(FATAL) << "Fail to load graph schema from yaml file: " << schema_path;
+    }
+    auto data_dir_res =
+        server::WorkDirManipulator::GetDataDirectory(default_graph);
+    if (!data_dir_res.ok()) {
+      LOG(FATAL) << "Fail to get data directory for default graph: "
+                 << data_dir_res.status().error_message();
+    }
+    std::string data_dir = data_dir_res.value();
+    if (!std::filesystem::exists(data_dir)) {
+      LOG(FATAL) << "Data directory not exists: " << data_dir
+                 << ", for graph: " << default_graph;
+    }
+    db.Close();
+    if (!db.Open(schema_res.value(), data_dir, thread_num).ok()) {
+      LOG(FATAL) << "Fail to load graph from data directory: " << data_dir;
+    }
+    LOG(INFO) << "Successfully init graph db for default graph: "
+              << default_graph;
+    server::WorkDirManipulator::SetRunningGraph(default_graph);
   }
-  std::string data_dir = data_dir_res.value();
-  if (!std::filesystem::exists(data_dir)) {
-    LOG(FATAL) << "Data directory not exists: " << data_dir
-               << ", for graph: " << default_graph;
-  }
-  db.Close();
-  if (!db.Open(schema, data_dir, thread_num).ok()) {
-    LOG(FATAL) << "Fail to load graph from data directory: " << data_dir;
-  }
-  LOG(INFO) << "Successfully init graph db for default graph: "
-            << default_graph;
-
-  server::WorkDirManipulator::SetRunningGraph(default_graph);
 }
 
 }  // namespace gs
@@ -243,7 +253,8 @@ int main(int argc, char** argv) {
 
     server::HQPSService::get().init(shard_num, admin_port, query_port, false,
                                     vm["open-thread-resource-pool"].as<bool>(),
-                                    vm["worker-thread-number"].as<unsigned>());
+                                    vm["worker-thread-number"].as<unsigned>(),
+                                    engine_config_file);
     server::HQPSService::get().run_and_wait_for_exit();
   } else {
     LOG(INFO) << "Start query service only";
@@ -265,11 +276,15 @@ int main(int argc, char** argv) {
     data_path = vm["data-path"].as<std::string>();
 
     auto schema = gs::Schema::LoadFromYaml(graph_schema_path);
+    if (!schema.ok()) {
+      LOG(FATAL) << "Failed to load graph schema from yaml file: "
+                 << graph_schema_path;
+    }
 
     // Ths schema is loaded just to get the plugin dir and plugin list
     gs::init_codegen_proxy(vm, graph_schema_path, engine_config_file);
     db.Close();
-    auto load_res = db.Open(schema, data_path, shard_num);
+    auto load_res = db.Open(schema.value(), data_path, shard_num);
     if (!load_res.ok()) {
       LOG(FATAL) << "Failed to load graph from data directory: "
                  << load_res.status().error_message();

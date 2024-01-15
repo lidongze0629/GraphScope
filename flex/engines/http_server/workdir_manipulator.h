@@ -34,6 +34,20 @@
 
 namespace server {
 
+struct LockFile {
+  std::string graph_name;
+  std::string lock_path;
+  LockFile() = default;
+  LockFile(const std::string& graph_name, const std::string& lock_path)
+      : graph_name(graph_name), lock_path(lock_path) {}
+
+  ~LockFile() {
+    if (std::filesystem::exists(lock_path)) {
+      std::filesystem::remove(lock_path);
+    }
+  }
+};
+
 /**
  * @brief The class to manipulate the workspace. All methods are static.
  */
@@ -57,6 +71,8 @@ class WorkDirManipulator {
   static void SetWorkspace(const std::string& workspace_path);
 
   static void SetRunningGraph(const std::string& graph_name);
+
+  static void ClearRunningGraph();
 
   static std::string GetRunningGraph();
 
@@ -128,7 +144,8 @@ class WorkDirManipulator {
       const std::string& graph_name, const std::string& procedure_name);
 
   static seastar::future<seastar::sstring> CreateProcedure(
-      const std::string& graph_name, const std::string& parameter);
+      const std::string& graph_name, const std::string& parameter,
+      const std::string& engine_config_path);
 
   static gs::Result<seastar::sstring> DeleteProcedure(
       const std::string& graph_name, const std::string& procedure_name);
@@ -166,7 +183,7 @@ class WorkDirManipulator {
 
   static bool is_graph_locked(const std::string& graph_name);
 
-  static bool try_lock_graph(const std::string& graph_name);
+  static gs::Result<LockFile> try_lock_graph(const std::string& graph_name);
 
   static void unlock_graph(const std::string& graph_name);
 
@@ -177,7 +194,7 @@ class WorkDirManipulator {
 
   // Generate the procedure, return the generated yaml config.
   static seastar::future<seastar::sstring> generate_procedure(
-      const nlohmann::json& json);
+      const nlohmann::json& json, const std::string& engine_config_path);
 
   static seastar::future<seastar::sstring> add_procedure_to_graph(
       const nlohmann::json& json, const std::string& proc_yaml_config);

@@ -133,7 +133,11 @@ seastar::future<query_result> admin_actor::run_graph_loading(
   // query_param constains two parameter, first for graph name, second for graph
   // config
   auto content = query_param.content;
-  auto& graph_name = content.first;
+  auto graph_name = content.first;
+  // Remove the / from the start of the graph_name
+  if (graph_name[0] == '/') {
+    graph_name = graph_name.substr(1);
+  }
   VLOG(1) << "Parse json payload for graph: " << graph_name;
   auto& graph_config = content.second;
 
@@ -221,7 +225,9 @@ seastar::future<query_result> admin_actor::create_procedure(
     create_procedure_query_param&& query_param) {
   auto& graph_name = query_param.content.first;
   auto& parameter = query_param.content.second;
-  return server::WorkDirManipulator::CreateProcedure(graph_name, parameter)
+  auto& hqps_service = HQPSService::get();
+  return server::WorkDirManipulator::CreateProcedure(
+             graph_name, parameter, hqps_service.get_engine_config_path())
       .then_wrapped([](auto&& f) {
         try {
           auto res = f.get();
@@ -248,10 +254,10 @@ seastar::future<query_result> admin_actor::delete_procedure(
     return seastar::make_ready_future<query_result>(
         std::move(delete_procedure_res.value()));
   } else {
-    LOG(ERROR) << "Fail to create procedure: "
+    LOG(ERROR) << "Fail to delete procedure: "
                << delete_procedure_res.status().error_message();
     return seastar::make_exception_future<query_result>(
-        std::runtime_error("Fail to create procedures: " +
+        std::runtime_error("Fail to delete procedures: " +
                            delete_procedure_res.status().error_message()));
   }
 }
@@ -269,10 +275,10 @@ seastar::future<query_result> admin_actor::update_procedure(
     return seastar::make_ready_future<query_result>(
         std::move(update_procedure_res.value()));
   } else {
-    LOG(ERROR) << "Fail to create procedure: "
+    LOG(ERROR) << "Fail to update procedure: "
                << update_procedure_res.status().error_message();
     return seastar::make_exception_future<query_result>(
-        std::runtime_error("Fail to create procedures: " +
+        std::runtime_error("Fail to update procedures: " +
                            update_procedure_res.status().error_message()));
   }
 }

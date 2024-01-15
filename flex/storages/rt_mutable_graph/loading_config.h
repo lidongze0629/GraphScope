@@ -78,8 +78,8 @@ class LoadingConfig {
                  schema_label_type>;  // src_label_t, dst_label_t, edge_label_t
 
   // Check whether loading config file is consistent with schema
-  static LoadingConfig ParseFromYamlFile(const Schema& schema,
-                                         const std::string& yaml_file);
+  static gs::Result<LoadingConfig> ParseFromYamlFile(
+      const Schema& schema, const std::string& yaml_file);
   static gs::Result<LoadingConfig> ParseFromYamlNode(
       const Schema& schema, const YAML::Node& yaml_node);
 

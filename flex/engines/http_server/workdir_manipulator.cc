@@ -32,6 +32,19 @@ void WorkDirManipulator::SetRunningGraph(const std::string& name) {
   }
 }
 
+void WorkDirManipulator::ClearRunningGraph() {
+  auto running_graph_file = workspace + "/" + RUNNING_GRAPH_FILE_NAME;
+  // If the file exists, rm
+  if (std::filesystem::exists(running_graph_file)) {
+    try {
+      std::filesystem::remove(running_graph_file);
+      LOG(INFO) << "Successfully clear running graph";
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Fail to clear running graph, error: " << e.what();
+    }
+  }
+}
+
 std::string WorkDirManipulator::GetRunningGraph() {
   auto running_graph_file = workspace + "/" + RUNNING_GRAPH_FILE_NAME;
   std::ifstream ifs(running_graph_file);
@@ -133,7 +146,11 @@ gs::Result<gs::Schema> WorkDirManipulator::GetGraphSchema(
   // Load schema from schema_file
   try {
     LOG(INFO) << "Load graph schema from file: " << schema_file;
-    schema = gs::Schema::LoadFromYaml(schema_file);
+    auto schema_res = gs::Schema::LoadFromYaml(schema_file);
+    if (!schema_res.ok()) {
+      return gs::Result<gs::Schema>(schema_res.status());
+    }
+    schema = schema_res.value();
   } catch (const std::exception& e) {
     LOG(ERROR) << "Fail to load graph schema: " << schema_file
                << ", error: " << e.what();
@@ -257,17 +274,25 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
         gs::StatusCode::IllegalOperation,
         "Graph is already running, can not be loaded: " + graph_name));
   }
-  if (!try_lock_graph(graph_name)) {
+  auto lock_res = try_lock_graph(graph_name);
+  if (!lock_res.ok()) {
     return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::IllegalOperation, "Fail to lock graph: " + graph_name));
   }
+  // We use a local object to ensure the lock is released when the function
+  // returns.
+  auto lock_file_obj = lock_res.value();
 
   // No need to check whether graph exists, because it is checked in LoadGraph
   // First load schema
   auto schema_file = GetGraphSchemaPath(graph_name);
   gs::Schema schema;
   try {
-    schema = gs::Schema::LoadFromYaml(schema_file);
+    auto schema_res = gs::Schema::LoadFromYaml(schema_file);
+    if (!schema_res.ok()) {
+      return gs::Result<seastar::sstring>(schema_res.status());
+    }
+    schema = schema_res.value();
   } catch (const std::exception& e) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
@@ -300,8 +325,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   if (!res.ok()) {
     return gs::Result<seastar::sstring>(res.status());
   }
-  // unlock graph
-  unlock_graph(graph_name);
+  // // unlock graph
+  // unlock_graph(graph_name);
 
   return gs::Result<seastar::sstring>(res.status(), res.value());
 }
@@ -425,7 +450,8 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
 }
 
 seastar::future<seastar::sstring> WorkDirManipulator::CreateProcedure(
-    const std::string& graph_name, const std::string& parameter) {
+    const std::string& graph_name, const std::string& parameter,
+    const std::string& engine_config_path) {
   if (!is_graph_exist(graph_name)) {
     return seastar::make_ready_future<seastar::sstring>("Graph not exists: " +
                                                         graph_name);
@@ -464,49 +490,50 @@ seastar::future<seastar::sstring> WorkDirManipulator::CreateProcedure(
     return seastar::make_exception_future<seastar::sstring>(
         "Procedure already exists: " + procedure_name);
   }
-  return generate_procedure(json).then_wrapped([json](auto&& fut) {
-    try {
-      auto res = fut.get();
-      bool enable = true;  // default enable.
-      if (json.contains("enable")) {
-        if (json["enable"].is_boolean()) {
-          enable = json["enable"].get<bool>();
-        } else if (json["enable"].is_string()) {
-          auto enable_str = json["enable"].get<std::string>();
-          if (enable_str == "true" || enable_str == "True" ||
-              enable_str == "TRUE") {
-            enable = true;
-          } else {
-            enable = false;
+  return generate_procedure(json, engine_config_path)
+      .then_wrapped([json](auto&& fut) {
+        try {
+          auto res = fut.get();
+          bool enable = true;  // default enable.
+          if (json.contains("enable")) {
+            if (json["enable"].is_boolean()) {
+              enable = json["enable"].get<bool>();
+            } else if (json["enable"].is_string()) {
+              auto enable_str = json["enable"].get<std::string>();
+              if (enable_str == "true" || enable_str == "True" ||
+                  enable_str == "TRUE") {
+                enable = true;
+              } else {
+                enable = false;
+              }
+            } else {
+              return seastar::make_ready_future<seastar::sstring>(
+                  "Fail to parse enable field: " + json["enable"].dump());
+            }
           }
-        } else {
+          LOG(INFO) << "Enable: " << std::to_string(enable);
+
+          // If create procedure success, update graph schema (dump to file)
+          // and add to plugin list. this is critical, and should be
+          // transactional.
+          if (enable) {
+            LOG(INFO)
+                << "Procedure is enabled, add to graph schema and plugin list.";
+            return add_procedure_to_graph(json, res);
+          } else {
+            // Not enabled, do nothing.
+            LOG(INFO) << "Procedure is not enabled, do nothing.";
+          }
+
           return seastar::make_ready_future<seastar::sstring>(
-              "Fail to parse enable field: " + json["enable"].dump());
+              seastar::sstring("Successfully create procedure"));
+        } catch (const std::exception& e) {
+          return seastar::make_ready_future<seastar::sstring>(
+              "Fail to generate procedure: " + std::string(e.what()));
         }
-      }
-      LOG(INFO) << "Enable: " << std::to_string(enable);
-
-      // If create procedure success, update graph schema (dump to file)
-      // and add to plugin list. this is critical, and should be
-      // transactional.
-      if (enable) {
-        LOG(INFO)
-            << "Procedure is enabled, add to graph schema and plugin list.";
-        return add_procedure_to_graph(json, res);
-      } else {
-        // Not enabled, do nothing.
-        LOG(INFO) << "Procedure is not enabled, do nothing.";
-      }
-
-      return seastar::make_ready_future<seastar::sstring>(
-          seastar::sstring("Successfully create procedure"));
-    } catch (const std::exception& e) {
-      return seastar::make_ready_future<seastar::sstring>(
-          "Fail to generate procedure: " + std::string(e.what()));
-    }
-    return seastar::make_ready_future<seastar::sstring>(
-        "Fail to generate procedure");
-  });
+        return seastar::make_ready_future<seastar::sstring>(
+            "Fail to generate procedure");
+      });
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::DeleteProcedure(
@@ -765,17 +792,20 @@ bool WorkDirManipulator::is_graph_locked(const std::string& graph_name) {
   return std::filesystem::exists(lock_file);
 }
 
-bool WorkDirManipulator::try_lock_graph(const std::string& graph_name) {
+gs::Result<LockFile> WorkDirManipulator::try_lock_graph(
+    const std::string& graph_name) {
   auto lock_file = get_graph_lock_file(graph_name);
   if (std::filesystem::exists(lock_file)) {
-    return false;
+    return gs::Result<LockFile>(gs::Status(gs::StatusCode::InternalError,
+                                           "Graph is locked: " + graph_name));
   }
   std::ofstream fout(lock_file);
   if (!fout.is_open()) {
-    return false;
+    return gs::Result<LockFile>(gs::Status(
+        gs::StatusCode::InternalError, "Fail to open lock file: " + lock_file));
   }
   fout.close();
-  return true;
+  return gs::Result<LockFile>(LockFile(graph_name, lock_file));
 }
 
 void WorkDirManipulator::unlock_graph(const std::string& graph_name) {
@@ -868,7 +898,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::create_procedure_sanity_check(
 }
 
 seastar::future<seastar::sstring> WorkDirManipulator::generate_procedure(
-    const nlohmann::json& json) {
+    const nlohmann::json& json, const std::string& engine_config_path) {
   LOG(INFO) << "Generate procedure: " << json.dump();
   auto codegen_bin = gs::find_codegen_bin();
   auto temp_codegen_directory =
@@ -915,11 +945,10 @@ seastar::future<seastar::sstring> WorkDirManipulator::generate_procedure(
     std::filesystem::create_directory(output_dir);
   }
   auto schema_path = GetGraphSchemaPath(bounded_graph);
-  auto engine_config = get_engine_config_path();
 
   return CodegenProxy::CallCodegenCmd(query_file, name, temp_codegen_directory,
-                                      output_dir, schema_path, engine_config,
-                                      codegen_bin)
+                                      output_dir, schema_path,
+                                      engine_config_path, codegen_bin)
       .then_wrapped([name, output_dir](auto&& f) {
         try {
           auto res = f.get();
@@ -1008,7 +1037,7 @@ seastar::future<seastar::sstring> WorkDirManipulator::add_procedure_to_graph(
   for (const auto& item : enable_lists) {
     if (item.as<std::string>() == proc_name) {
       return seastar::make_exception_future<seastar::sstring>(
-          "Procedure already exists in graph: " + graph_name);
+          "Procedure " + proc_name + " already exists in graph: " + graph_name);
     }
   }
   enable_lists.push_back(proc_name);

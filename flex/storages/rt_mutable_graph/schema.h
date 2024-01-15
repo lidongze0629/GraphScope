@@ -152,7 +152,7 @@ class Schema {
 
   void Deserialize(std::unique_ptr<grape::LocalIOAdaptor>& reader);
 
-  static Schema LoadFromYaml(const std::string& schema_config);
+  static Result<Schema> LoadFromYaml(const std::string& schema_config);
 
   static Result<Schema> LoadFromYamlNode(const YAML::Node& schema_node);
 

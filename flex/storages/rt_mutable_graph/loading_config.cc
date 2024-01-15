@@ -577,13 +577,17 @@ static bool parse_bulk_load_config_yaml(const YAML::Node& root,
 }
 }  // namespace config_parsing
 
-LoadingConfig LoadingConfig::ParseFromYamlFile(const Schema& schema,
-                                               const std::string& yaml_file) {
+Result<LoadingConfig> LoadingConfig::ParseFromYamlFile(
+    const Schema& schema, const std::string& yaml_file) {
   LoadingConfig load_config(schema);
   if (!yaml_file.empty() && std::filesystem::exists(yaml_file)) {
     if (!config_parsing::parse_bulk_load_config_file(yaml_file, schema,
                                                      load_config)) {
-      LOG(FATAL) << "Failed to parse bulk load config file: " << yaml_file;
+      LOG(ERROR) << "Failed to parse bulk load config file: " << yaml_file;
+      return gs::Result<LoadingConfig>(
+          gs::Status(gs::StatusCode::InvalidImportFile,
+                     "Failed to parse bulk load config file: " + yaml_file),
+          load_config);
     }
   }
   return load_config;
@@ -596,12 +600,16 @@ Result<LoadingConfig> LoadingConfig::ParseFromYamlNode(
     if (!yaml_node.IsNull()) {
       if (!config_parsing::parse_bulk_load_config_yaml(yaml_node, schema,
                                                        load_config)) {
-        LOG(FATAL) << "Failed to parse bulk load config: ";
+        LOG(ERROR) << "Failed to parse bulk load config: ";
+        return gs::Result<LoadingConfig>(
+            gs::Status(gs::StatusCode::InternalError,
+                       "Failed to parse yaml node"),
+            load_config);
       }
     }
   } catch (const YAML::Exception& e) {
     return gs::Result<LoadingConfig>(
-        gs::Status(gs::StatusCode::InvalidImportFile,
+        gs::Status(gs::StatusCode::InternalError,
                    "Failed to parse yaml node: " + std::string(e.what())),
         load_config);
   }
