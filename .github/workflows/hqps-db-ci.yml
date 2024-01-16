@@ -115,7 +115,7 @@ jobs:
       env: 
         GS_TEST_DIR: ${{ github.workspace }}/gstest
         FLEX_DATA_DIR: ${{ github.workspace }}/flex/interactive/examples/modern_graph
-      run:
+      run: |
         sed -i 's/default_graph: ldbc/default_graph: modern_graph/g' ./engine_config_test.yaml
         cd ${GITHUB_WORKSPACE}/flex/build/
         SCHEMA_FILE=../interactive/examples/modern_graph/modern_graph.yaml
