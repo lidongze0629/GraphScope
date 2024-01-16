@@ -1,5 +1,6 @@
 #include "flex/engines/http_server/workdir_manipulator.h"
 #include "flex/engines/http_server/codegen_proxy.h"
+#include "flex/storages/rt_mutable_graph/loading_config.h"
 
 // Write a macro to define the function, to check whether a filed presents in a
 // json object.
@@ -321,7 +322,11 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
                        ", error: " + dump_res.status().error_message()));
   }
 
-  auto res = LoadGraph(temp_file_path, graph_name, loading_thread_num);
+  bool overwrite = loading_config.GetMethod() == gs::BulkLoadMethod::kOverwrite
+                       ? true
+                       : false;
+  auto res =
+      LoadGraph(temp_file_path, graph_name, loading_thread_num, overwrite);
   if (!res.ok()) {
     return gs::Result<seastar::sstring>(res.status());
   }
@@ -649,8 +654,9 @@ gs::Result<seastar::sstring> WorkDirManipulator::UpdateProcedure(
   }
   auto plugin_file = plugin_dir + "/" + procedure_name + ".yaml";
   if (!std::filesystem::exists(plugin_file)) {
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::NotExists, "plugin not found " + plugin_file));
+    return gs::Result<seastar::sstring>(
+        gs::Status(gs::StatusCode::NotExists,
+                   "plugin not found when update procedure:" + plugin_file));
   }
   // load parameter as json, and do some check
   nlohmann::json json;
@@ -848,14 +854,21 @@ gs::Result<std::string> WorkDirManipulator::dump_graph_schema(
 
 gs::Result<std::string> WorkDirManipulator::LoadGraph(
     const std::string& config_file_path, const std::string& graph_name,
-    int32_t loading_thread_num) {
-  // TODO: call GRAPH_LOADER_BIN.
+    int32_t loading_thread_num, bool overwrite) {
   auto schema_file = GetGraphSchemaPath(graph_name);
-  auto cur_indices_dir = GetGraphIndicesDir(graph_name);
-  // system call to GRAPH_LOADER_BIN schema_file, loading_config,
-  // cur_indices_dir
+  auto final_indices_dir = GetGraphIndicesDir(graph_name);
+  std::string tmp_indices_dir;
+  if (overwrite) {
+    tmp_indices_dir = final_indices_dir + "_tmp";
+    // remove tmp_indices_dir if exists
+    if (std::filesystem::exists(tmp_indices_dir)) {
+      std::filesystem::remove_all(tmp_indices_dir);
+    }
+  } else {
+    tmp_indices_dir = final_indices_dir;
+  }
   std::string cmd_string = GRAPH_LOADER_BIN + " -g " + schema_file + " -l " +
-                           config_file_path + " -d " + cur_indices_dir + " " +
+                           config_file_path + " -d " + tmp_indices_dir + " " +
                            std::to_string(loading_thread_num);
   LOG(INFO) << "Call graph_loader: " << cmd_string;
   auto res = std::system(cmd_string.c_str());
@@ -864,6 +877,15 @@ gs::Result<std::string> WorkDirManipulator::LoadGraph(
         gs::Status(gs::StatusCode::InternalError,
                    "Fail to load graph: " + graph_name +
                        ", error code: " + std::to_string(res)));
+  }
+  // if overwrite, then remove final_indices_dir and rename tmp_indices_dir to
+  // final_indices_dir, otherwise, do nothing.
+  if (overwrite) {
+    CHECK(std::filesystem::exists(tmp_indices_dir));
+    if (std::filesystem::exists(final_indices_dir)) {
+      std::filesystem::remove_all(final_indices_dir);
+    }
+    std::filesystem::rename(tmp_indices_dir, final_indices_dir);
   }
 
   return gs::Result<std::string>(

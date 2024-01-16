@@ -71,7 +71,7 @@ bool parse_bulk_load_config_yaml(const YAML::Node& yaml_node,
                                  LoadingConfig& load_config);
 }  // namespace config_parsing
 
-enum class BulkLoadMethod { kInit = 0 };
+enum class BulkLoadMethod { kInit = 0, kOverwrite = 1 };
 
 // Provide meta info about bulk loading.
 class LoadingConfig {

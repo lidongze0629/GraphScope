@@ -122,10 +122,11 @@ class WorkDirManipulator {
    * @param yaml_config_file The config file of the graph.
    * @param yaml_node The config of the graph.
    * @param loading_thread_num The number of threads to load the graph.
+   * @param overwrite Whether to overwrite the graph if it exists.
    */
   static gs::Result<std::string> LoadGraph(const std::string& yaml_config_file,
                                            const std::string& graph_name,
-                                           int32_t thread_num);
+                                           int32_t thread_num, bool overwrite);
 
   /**
    * @brief Get all procedures bound to the graph.
