@@ -199,18 +199,13 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto graph_name = req->param.at("graph_name");
+      auto graph_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
       // remove / from the graph_name
-      graph_name.erase(std::remove(graph_name.begin(), graph_name.end(), '/'),
-                       graph_name.end());
       if (req->param.exists("procedure_name")) {
         // Get the procedures
-        auto procedure_name = req->param.at("procedure_name");
-        // remove / from the procedure_name
-        procedure_name.erase(
-            std::remove(procedure_name.begin(), procedure_name.end(), '/'),
-            procedure_name.end());
-
+        auto procedure_name = WorkDirManipulator::trim_graph_name(
+            req->param.at("procedure_name"));
         LOG(INFO) << "Get procedure for: " << graph_name << ", "
                   << procedure_name;
         auto pair = std::make_pair(graph_name, procedure_name);
@@ -251,10 +246,9 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto graph_name = req->param.at("graph_name");
+      auto graph_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
       // remove / from the graph_name
-      graph_name.erase(std::remove(graph_name.begin(), graph_name.end(), '/'),
-                       graph_name.end());
       LOG(INFO) << "Creating procedure for: " << graph_name;
       return admin_actor_refs_[dst_executor]
           .create_procedure(create_procedure_query_param{
@@ -281,13 +275,10 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto graph_name = req->param.at("graph_name");
-      graph_name.erase(std::remove(graph_name.begin(), graph_name.end(), '/'),
-                       graph_name.end());
-      auto procedure_name = req->param.at("procedure_name");
-      procedure_name.erase(
-          std::remove(procedure_name.begin(), procedure_name.end(), '/'),
-          procedure_name.end());
+      auto graph_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+      auto procedure_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("procedure_name"));
       LOG(INFO) << "Deleting procedure for: " << graph_name << ", "
                 << procedure_name;
       return admin_actor_refs_[dst_executor]
@@ -314,13 +305,10 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto graph_name = req->param.at("graph_name");
-      graph_name.erase(std::remove(graph_name.begin(), graph_name.end(), '/'),
-                       graph_name.end());
-      auto procedure_name = req->param.at("procedure_name");
-      procedure_name.erase(
-          std::remove(procedure_name.begin(), procedure_name.end(), '/'),
-          procedure_name.end());
+      auto graph_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+      auto procedure_name =
+          WorkDirManipulator::trim_graph_name(req->param.at("procedure_name"));
       LOG(INFO) << "Update procedure for: " << graph_name << ", "
                 << procedure_name;
       return admin_actor_refs_[dst_executor]
@@ -386,15 +374,24 @@ class admin_http_service_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto action = req->param.at("action");
+      auto action =
+          WorkDirManipulator::trim_graph_name(req->param.at("action"));
       LOG(INFO) << "POST with action: " << action;
-      // Remove / from the action
-      action.erase(std::remove(action.begin(), action.end(), '/'),
-                   action.end());
-
-      if (action == "start" || action == "restart") {
+      if (action == "start") {
         return admin_actor_refs_[dst_executor]
             .start_service(query_param{std::move(req->content)})
+            .then_wrapped([rep = std::move(rep)](
+                              seastar::future<query_result_v2>&& fut) mutable {
+              if (__builtin_expect(fut.failed(), false)) {
+                return catch_exception_and_return_reply(std::move(rep),
+                                                        fut.get_exception());
+              }
+              return return_reply_with_result(std::move(rep),
+                                              std::move(fut.get0()));
+            });
+      } else if (action == "restart") {
+        return admin_actor_refs_[dst_executor]
+            .restart_service(query_param{std::move(req->content)})
             .then_wrapped([rep = std::move(rep)](
                               seastar::future<query_result_v2>&& fut) mutable {
               if (__builtin_expect(fut.failed(), false)) {

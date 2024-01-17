@@ -31,9 +31,6 @@
 namespace bpo = boost::program_options;
 
 namespace gs {
-static constexpr const uint32_t DEFAULT_SHARD_NUM = 1;
-static constexpr const uint32_t DEFAULT_QUERY_PORT = 10000;
-static constexpr const uint32_t DEFAULT_ADMIN_PORT = 7777;
 
 std::string parse_codegen_dir(const bpo::variables_map& vm) {
   std::string codegen_dir;
@@ -57,12 +54,9 @@ std::string parse_codegen_dir(const bpo::variables_map& vm) {
 }
 
 // parse from yaml
-std::tuple<uint32_t, uint32_t, uint32_t, std::string> parse_from_server_config(
-    const std::string& server_config_path) {
+void parse_from_server_config(const std::string& server_config_path,
+                              server::ServiceConfig& service_config) {
   YAML::Node config = YAML::LoadFile(server_config_path);
-  uint32_t shard_num = DEFAULT_SHARD_NUM;
-  uint32_t query_port = DEFAULT_QUERY_PORT;
-  uint32_t admin_port = DEFAULT_ADMIN_PORT;
   auto engine_node = config["compute_engine"];
   if (engine_node) {
     auto engine_type = engine_node["type"];
@@ -75,10 +69,10 @@ std::tuple<uint32_t, uint32_t, uint32_t, std::string> parse_from_server_config(
     }
     auto shard_num_node = engine_node["thread_num_per_worker"];
     if (shard_num_node) {
-      shard_num = shard_num_node.as<uint32_t>();
+      service_config.shard_num = shard_num_node.as<uint32_t>();
     } else {
       LOG(INFO) << "shard_num not found, use default value "
-                << DEFAULT_SHARD_NUM;
+                << service_config.shard_num;
     }
   } else {
     LOG(FATAL) << "Fail to find compute_engine configuration";
@@ -87,17 +81,17 @@ std::tuple<uint32_t, uint32_t, uint32_t, std::string> parse_from_server_config(
   if (http_service_node) {
     auto query_port_node = http_service_node["query_port"];
     if (query_port_node) {
-      query_port = query_port_node.as<uint32_t>();
+      service_config.query_port = query_port_node.as<uint32_t>();
     } else {
       LOG(INFO) << "query_port not found, use default value "
-                << DEFAULT_QUERY_PORT;
+                << service_config.query_port;
     }
     auto admin_port_node = http_service_node["admin_port"];
     if (admin_port_node) {
-      admin_port = admin_port_node.as<uint32_t>();
+      service_config.admin_port = admin_port_node.as<uint32_t>();
     } else {
       LOG(INFO) << "admin_port not found, use default value "
-                << DEFAULT_ADMIN_PORT;
+                << service_config.admin_port;
     }
   } else {
     LOG(FATAL) << "Fail to find http_service configuration";
@@ -109,7 +103,8 @@ std::tuple<uint32_t, uint32_t, uint32_t, std::string> parse_from_server_config(
   } else {
     LOG(WARNING) << "Fail to find default_graph configuration";
   }
-  return std::make_tuple(shard_num, admin_port, query_port, default_graph);
+  service_config.default_graph = default_graph;
+  service_config.engine_config_path = server_config_path;
 }
 
 void init_codegen_proxy(const bpo::variables_map& vm,
@@ -221,9 +216,7 @@ int main(int argc, char** argv) {
   }
 
   //// declare vars
-  int32_t shard_num = 1;
-  int32_t admin_port = gs::DEFAULT_ADMIN_PORT;
-  int32_t query_port = gs::DEFAULT_QUERY_PORT;
+
   bool start_admin_service;
   std::string workspace, default_graph;
 
@@ -234,8 +227,8 @@ int main(int argc, char** argv) {
   }
   auto engine_config_file = vm["server-config"].as<std::string>();
   // When only starting query service.
-  std::tie(shard_num, admin_port, query_port, default_graph) =
-      gs::parse_from_server_config(engine_config_file);
+  server::ServiceConfig service_config;
+  gs::parse_from_server_config(engine_config_file, service_config);
   auto& db = gs::GraphDB::get();
 
   if (start_admin_service) {
@@ -246,15 +239,19 @@ int main(int argc, char** argv) {
                     "data-path should NOT be specified";
     }
 
-    gs::initWorkspace(
-        workspace, shard_num,
-        default_graph);  // Suppose the default_graph is already loaded.
+    gs::initWorkspace(workspace, service_config.shard_num,
+                      service_config.default_graph);
+    // Suppose the default_graph is already loaded.
     LOG(INFO) << "Finish init workspace";
 
-    server::HQPSService::get().init(shard_num, admin_port, query_port, false,
-                                    vm["open-thread-resource-pool"].as<bool>(),
-                                    vm["worker-thread-number"].as<unsigned>(),
-                                    engine_config_file);
+    // During the running of the server, we may use some file to denote the lock
+    // or running graph.
+    std::atexit([]() { server::WorkDirManipulator::ClearRunningGraph(); });
+    std::atexit([]() { server::WorkDirManipulator::ClearLockFile(); });
+
+    server::HQPSService::get().init_with_admin_service(
+        service_config, false, vm["open-thread-resource-pool"].as<bool>(),
+        vm["worker-thread-number"].as<unsigned>());
     server::HQPSService::get().run_and_wait_for_exit();
   } else {
     LOG(INFO) << "Start query service only";
@@ -284,15 +281,16 @@ int main(int argc, char** argv) {
     // Ths schema is loaded just to get the plugin dir and plugin list
     gs::init_codegen_proxy(vm, graph_schema_path, engine_config_file);
     db.Close();
-    auto load_res = db.Open(schema.value(), data_path, shard_num);
+    auto load_res =
+        db.Open(schema.value(), data_path, service_config.shard_num);
     if (!load_res.ok()) {
       LOG(FATAL) << "Failed to load graph from data directory: "
                  << load_res.status().error_message();
     }
 
-    server::HQPSService::get().init(shard_num, query_port, false,
-                                    vm["open-thread-resource-pool"].as<bool>(),
-                                    vm["worker-thread-number"].as<unsigned>());
+    server::HQPSService::get().init_without_admin_service(
+        service_config, false, vm["open-thread-resource-pool"].as<bool>(),
+        vm["worker-thread-number"].as<unsigned>());
     server::HQPSService::get().run_and_wait_for_exit();
   }
 

@@ -16,6 +16,12 @@
 #include "flex/engines/http_server/options.h"
 namespace server {
 
+ServiceConfig::ServiceConfig()
+    : bolt_port(DEFAULT_BOLT_PORT),
+      admin_port(DEFAULT_ADMIN_PORT),
+      query_port(DEFAULT_QUERY_PORT),
+      shard_num(DEFAULT_SHARD_NUM) {}
+
 const std::string HQPSService::DEFAULT_GRAPH_NAME = "modern_graph";
 
 HQPSService& HQPSService::get() {
@@ -23,35 +29,38 @@ HQPSService& HQPSService::get() {
   return instance;
 }
 
-void HQPSService::init(uint32_t num_shards, uint16_t query_port, bool dpdk_mode,
-                       bool enable_thread_resource_pool,
-                       unsigned external_thread_num) {
+void HQPSService::init_without_admin_service(const ServiceConfig& config,
+                                             bool dpdk_mode,
+                                             bool enable_thread_resource_pool,
+                                             unsigned external_thread_num) {
   if (initialized_.load(std::memory_order_relaxed)) {
     std::cerr << "High QPS service has been already initialized!" << std::endl;
     return;
   }
-  actor_sys_ = std::make_unique<actor_system>(
-      num_shards, dpdk_mode, enable_thread_resource_pool, external_thread_num);
-  query_hdl_ = std::make_unique<hqps_http_handler>(query_port);
+  actor_sys_ = std::make_unique<actor_system>(config.shard_num, dpdk_mode,
+                                              enable_thread_resource_pool,
+                                              external_thread_num);
+  query_hdl_ = std::make_unique<hqps_http_handler>(config.query_port);
   initialized_.store(true);
+  service_config_ = config;
   gs::init_cpu_usage_watch();
 }
 
-void HQPSService::init(uint32_t num_shards, uint16_t admin_port,
-                       uint16_t query_port, bool dpdk_mode,
-                       bool enable_thread_resource_pool,
-                       unsigned external_thread_num,
-                       std::string engine_config_path) {
+void HQPSService::init_with_admin_service(const ServiceConfig& config,
+                                          bool dpdk_mode,
+                                          bool enable_thread_resource_pool,
+                                          unsigned external_thread_num) {
   if (initialized_.load(std::memory_order_relaxed)) {
     std::cerr << "High QPS service has been already initialized!" << std::endl;
     return;
   }
-  actor_sys_ = std::make_unique<actor_system>(
-      num_shards, dpdk_mode, enable_thread_resource_pool, external_thread_num);
-  query_hdl_ = std::make_unique<hqps_http_handler>(query_port);
-  admin_hdl_ = std::make_unique<admin_http_handler>(admin_port);
+  actor_sys_ = std::make_unique<actor_system>(config.shard_num, dpdk_mode,
+                                              enable_thread_resource_pool,
+                                              external_thread_num);
+  query_hdl_ = std::make_unique<hqps_http_handler>(config.query_port);
+  admin_hdl_ = std::make_unique<admin_http_handler>(config.admin_port);
   initialized_.store(true);
-  engine_config_path_ = engine_config_path;
+  service_config_ = config;
   gs::init_cpu_usage_watch();
 }
 
@@ -77,7 +86,11 @@ uint16_t HQPSService::get_query_port() const {
 }
 
 std::string HQPSService::get_engine_config_path() const {
-  return engine_config_path_;
+  return service_config_.engine_config_path;
+}
+
+const ServiceConfig& HQPSService::get_service_config() const {
+  return service_config_;
 }
 
 gs::Result<seastar::sstring> HQPSService::service_status() {
@@ -117,6 +130,7 @@ void HQPSService::run_and_wait_for_exit() {
 void HQPSService::set_exit_state() { running_.store(false); }
 
 seastar::future<> HQPSService::stop_query_actors() {
+  std::unique_lock<std::mutex> lock(mtx_);
   if (query_hdl_) {
     return query_hdl_->stop_query_actors();
   } else {
@@ -127,6 +141,7 @@ seastar::future<> HQPSService::stop_query_actors() {
 }
 
 void HQPSService::start_query_actors() {
+  std::unique_lock<std::mutex> lock(mtx_);
   if (query_hdl_) {
     query_hdl_->start_query_actors();
   } else {

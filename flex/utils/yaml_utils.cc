@@ -92,6 +92,9 @@ nlohmann::json convert_yaml_node_to_json(const YAML::Node& node) {
 
 Result<std::string> get_json_string_from_yaml(const YAML::Node& node) {
   try {
+    if (node.IsNull()) {
+      return Result<std::string>(Status{StatusCode::OK, "{}"});
+    }
     nlohmann::json json = convert_yaml_node_to_json(node);
     return json.dump(2);  // 2 indents
   } catch (const YAML::BadConversion& e) {

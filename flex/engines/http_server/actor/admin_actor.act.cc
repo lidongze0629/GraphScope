@@ -81,10 +81,11 @@ seastar::future<query_result_v2> admin_actor::run_create_graph(
 // query_param is the graph name
 seastar::future<query_result_v2> admin_actor::run_get_graph_schema(
     query_param&& query_param) {
-  LOG(INFO) << "Get Graph schema for graph: " << query_param.content;
+  auto graph_name = WorkDirManipulator::trim_graph_name(query_param.content);
+  LOG(INFO) << "Get Graph schema for graph: " << graph_name;
 
   auto schema_result =
-      server::WorkDirManipulator::GetGraphSchemaString(query_param.content);
+      server::WorkDirManipulator::GetGraphSchemaString(graph_name);
   if (schema_result.ok()) {
     return seastar::make_ready_future<query_result_v2>(
         std::move(schema_result.value()));
@@ -116,10 +117,10 @@ seastar::future<query_result_v2> admin_actor::run_list_graphs(
 // delete one graph
 seastar::future<query_result_v2> admin_actor::run_delete_graph(
     query_param&& query_param) {
-  LOG(INFO) << "Delete graph: " << query_param.content;
+  auto delete_graph_name =
+      WorkDirManipulator::trim_graph_name(query_param.content);
 
-  auto delete_res =
-      server::WorkDirManipulator::DeleteGraph(query_param.content);
+  auto delete_res = server::WorkDirManipulator::DeleteGraph(delete_graph_name);
   if (delete_res.ok()) {
     return seastar::make_ready_future<query_result_v2>(
         std::move(delete_res.value()));
@@ -137,11 +138,9 @@ seastar::future<query_result_v2> admin_actor::run_graph_loading(
   // query_param constains two parameter, first for graph name, second for graph
   // config
   auto content = query_param.content;
-  auto graph_name = content.first;
+  auto graph_name = WorkDirManipulator::trim_graph_name(content.first);
   // Remove the / from the start of the graph_name
-  if (graph_name[0] == '/') {
-    graph_name = graph_name.substr(1);
-  }
+
   VLOG(1) << "Parse json payload for graph: " << graph_name;
   auto& graph_config = content.second;
 
@@ -289,6 +288,25 @@ seastar::future<query_result_v2> admin_actor::update_procedure(
 
 // Start service on a graph first means stop all current running actors, then
 // switch graph and and create new actors with a unused scope_id.
+seastar::future<query_result_v2> admin_actor::restart_service(
+    query_param&& query_param) {
+  // First Stop query_handler's actors.
+
+  auto& hqps_service = HQPSService::get();
+  return hqps_service.stop_query_actors().then([this, &hqps_service] {
+    LOG(INFO) << "Successfully stopped query handler";
+    hqps_service.start_query_actors();  // start on a new scope.
+    LOG(INFO) << "Successfully restart query actors";
+    LOG(INFO) << "Successfully started service with graph: "
+              << WorkDirManipulator::GetRunningGraph();
+    return seastar::make_ready_future<query_result_v2>(
+        seastar::sstring("Successfully restart service on Graph: " +
+                         WorkDirManipulator::GetRunningGraph()));
+  });
+}
+
+// Start service on a graph first means stop all current running actors, then
+// switch graph and and create new actors with a unused scope_id.
 seastar::future<query_result_v2> admin_actor::start_service(
     query_param&& query_param) {
   // parse query_param.content as json and get graph_name
@@ -368,8 +386,12 @@ seastar::future<query_result_v2> admin_actor::start_service(
 // The port is still connectable.
 seastar::future<query_result_v2> admin_actor::stop_service(
     query_param&& query_param) {
-  return seastar::make_ready_future<query_result_v2>(
-      seastar::sstring("Not implemented"));
+  auto& hqps_service = HQPSService::get();
+  return hqps_service.stop_query_actors().then([this, &hqps_service] {
+    LOG(INFO) << "Successfully stopped query handler";
+    return seastar::make_ready_future<query_result_v2>(
+        seastar::sstring("Successfully stop service"));
+  });
 }
 
 // get service status
@@ -380,7 +402,9 @@ seastar::future<query_result_v2> admin_actor::service_status(
   nlohmann::json res;
   if (query_port != 0) {
     res["status"] = "running";
-    res["query_port"] = query_port;
+    res["hqps_port"] = query_port;
+    res["bolt_port"] = hqps_service.get_service_config().bolt_port;
+    res["admin_port"] = hqps_service.get_service_config().admin_port;
     res["graph_name"] = server::WorkDirManipulator::GetRunningGraph();
   } else {
     LOG(INFO) << "Query service has not been inited!";

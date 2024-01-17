@@ -26,6 +26,26 @@
 
 namespace server {
 
+/* Stored service configuration, read from engine_config.yaml
+ */
+struct ServiceConfig {
+  static constexpr const uint32_t DEFAULT_SHARD_NUM = 1;
+  static constexpr const uint32_t DEFAULT_QUERY_PORT = 10000;
+  static constexpr const uint32_t DEFAULT_ADMIN_PORT = 7777;
+  static constexpr const uint32_t DEFAULT_BOLT_PORT = 7687;
+
+  // Those has default value
+  uint32_t bolt_port;
+  uint32_t admin_port;
+  uint32_t query_port;
+  uint32_t shard_num;
+
+  // Those has not default value
+  std::string default_graph;
+  std::string engine_config_path;  // used for codegen.
+  ServiceConfig();
+};
+
 class HQPSService {
  public:
   static const std::string DEFAULT_GRAPH_NAME;
@@ -33,13 +53,14 @@ class HQPSService {
   ~HQPSService();
 
   // only start the query service.
-  void init(uint32_t num_shards, uint16_t query_port, bool dpdk_mode,
-            bool enable_thread_resource_pool, unsigned external_thread_num);
+  void init_with_admin_service(const ServiceConfig& service_config,
+                               bool dpdk_mode, bool enable_thread_resource_pool,
+                               unsigned external_thread_num);
 
-  // start both admin and query service.
-  void init(uint32_t num_shards, uint16_t admin_port, uint16_t query_port,
-            bool dpdk_mode, bool enable_thread_resource_pool,
-            unsigned external_thread_num, std::string engine_config_path);
+  void init_without_admin_service(const ServiceConfig& service_config,
+                                  bool dpdk_mode,
+                                  bool enable_thread_resource_pool,
+                                  unsigned external_thread_num);
 
   bool is_initialized() const;
 
@@ -48,6 +69,8 @@ class HQPSService {
   uint16_t get_query_port() const;
 
   std::string get_engine_config_path() const;
+
+  const ServiceConfig& get_service_config() const;
 
   gs::Result<seastar::sstring> service_status();
 
@@ -72,7 +95,9 @@ class HQPSService {
   std::unique_ptr<hqps_http_handler> query_hdl_;
   std::atomic<bool> running_{false};
   std::atomic<bool> initialized_{false};
-  std::string engine_config_path_;
+  std::mutex mtx_;
+
+  ServiceConfig service_config_;
 };
 
 }  // namespace server

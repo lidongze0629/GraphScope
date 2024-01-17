@@ -59,6 +59,17 @@ class Status {
   std::string error_msg_;
 };
 
+// define a macro, which checks the return status of a function, if ok, continue
+// to execute, otherwise, return the status.
+// the macro accept the calling code of a function, and the function name.
+#define RETURN_IF_NOT_OK(expr) \
+  do {                         \
+    auto status = (expr);      \
+    if (!status.ok()) {        \
+      return status;           \
+    }                          \
+  } while (0)
+
 // Define a class with name Result<T>, which is a template class
 // Stores the result of a function that may fail.
 // If the function succeeds, the result contains the value returned by the

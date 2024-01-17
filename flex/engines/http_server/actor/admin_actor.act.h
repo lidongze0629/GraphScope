@@ -43,6 +43,8 @@ class ANNOTATION(actor:impl) admin_actor : public hiactor::actor {
 
   seastar::future<query_result_v2> ANNOTATION(actor:method) start_service(query_param&& param);
 
+  seastar::future<query_result_v2> ANNOTATION(actor:method) restart_service(query_param&& param);
+
   seastar::future<query_result_v2> ANNOTATION(actor:method) stop_service(query_param&& param);
 
   seastar::future<query_result_v2> ANNOTATION(actor:method) service_status(query_param&& param);

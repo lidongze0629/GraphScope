@@ -73,9 +73,15 @@ catch_exception_and_return_reply(std::unique_ptr<seastar::httpd::reply> rep,
 seastar::future<std::unique_ptr<seastar::httpd::reply>>
 return_reply_with_result(std::unique_ptr<seastar::httpd::reply> rep,
                          query_result_v2&& result) {
-  rep->write_body("application/json", std::move(result.content.value()));
-  rep->set_status(
-      status_code_to_http_code(result.content.status().error_code()));
+  auto status_code =
+      status_code_to_http_code(result.content.status().error_code());
+  rep->set_status(status_code);
+  if (status_code == seastar::httpd::reply::status_type::ok) {
+    rep->write_body("application/json", std::move(result.content.value()));
+  } else {
+    rep->write_body("application/json",
+                    seastar::sstring(result.content.status().error_message()));
+  }
   rep->done();
   return seastar::make_ready_future<std::unique_ptr<seastar::httpd::reply>>(
       std::move(rep));

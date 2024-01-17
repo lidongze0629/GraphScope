@@ -46,6 +46,28 @@ void WorkDirManipulator::ClearRunningGraph() {
   }
 }
 
+void WorkDirManipulator::ClearLockFile() {
+  // for each graph under data_workspace, check whether lock file exists, if
+  // exists, remove it.
+  auto data_workspace = workspace + "/" + DATA_DIR_NAME;
+  for (const auto& entry :
+       std::filesystem::directory_iterator(data_workspace)) {
+    if (entry.is_directory()) {
+      auto graph_name = entry.path().filename().string();
+      auto lock_file = get_graph_lock_file(graph_name);
+      if (std::filesystem::exists(lock_file)) {
+        try {
+          std::filesystem::remove(lock_file);
+          LOG(INFO) << "Successfully clear lock file for graph: " << graph_name;
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "Fail to clear lock file for graph: " << graph_name
+                     << ", error: " << e.what();
+        }
+      }
+    }
+  }
+}
+
 std::string WorkDirManipulator::GetRunningGraph() {
   auto running_graph_file = workspace + "/" + RUNNING_GRAPH_FILE_NAME;
   std::ifstream ifs(running_graph_file);
@@ -213,7 +235,9 @@ gs::Result<seastar::sstring> WorkDirManipulator::ListGraphs() {
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::DeleteGraph(
-    const std::string& graph_name) {
+    const std::string& raw_graph_name) {
+  auto graph_name = trim_graph_name(raw_graph_name);
+
   if (!is_graph_exist(graph_name)) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::NotExists,
@@ -422,7 +446,7 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
         gs::StatusCode::InternalError,
         "Fail to load graph plugin: " + plugin_file + ", error: " + e.what()));
   }
-  plugin_node["enabled"] = false;
+  plugin_node["enable"] = false;
 
   if (schema_node["stored_procedures"]) {
     auto procedure_node = schema_node["stored_procedures"];
@@ -436,7 +460,7 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
         if (std::find(procedure_list.begin(), procedure_list.end(),
                       procedure_name) != procedure_list.end()) {
           // add enabled: true to the plugin yaml.
-          plugin_node["enabled"] = true;
+          plugin_node["enable"] = true;
         }
       }
     } else {
@@ -821,6 +845,17 @@ void WorkDirManipulator::unlock_graph(const std::string& graph_name) {
   }
 }
 
+std::string WorkDirManipulator::trim_graph_name(const std::string& str) {
+  auto res = str;
+  if (res.back() == '/') {
+    res.pop_back();
+  }
+  if (res.front() == '/') {
+    res = str.substr(1);
+  }
+  return res;
+}
+
 std::string WorkDirManipulator::get_engine_config_path() {
   return workspace + "/conf/" + CONF_ENGINE_CONFIG_FILE_NAME;
 }
@@ -881,6 +916,9 @@ gs::Result<std::string> WorkDirManipulator::LoadGraph(
   // if overwrite, then remove final_indices_dir and rename tmp_indices_dir to
   // final_indices_dir, otherwise, do nothing.
   if (overwrite) {
+    LOG(INFO) << "Overwrite is true, rename tmp_indices_dir to "
+                 "final_indices_dir: "
+              << tmp_indices_dir << " -> " << final_indices_dir;
     CHECK(std::filesystem::exists(tmp_indices_dir));
     if (std::filesystem::exists(final_indices_dir)) {
       std::filesystem::remove_all(final_indices_dir);
@@ -1093,7 +1131,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
         auto procedure_yaml_file = entry.path().string();
         try {
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
-          procedure_yaml_node["enabled"] = false;
+          procedure_yaml_node["enable"] = false;
           if (!procedure_yaml_node["name"]) {
             LOG(ERROR) << "Procedure yaml file not contains name: "
                        << procedure_yaml_file;
@@ -1106,7 +1144,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
           if (std::find(procedure_names.begin(), procedure_names.end(),
                         proc_name) != procedure_names.end()) {
             // only add the procedure yaml file that is in procedure_names.
-            procedure_yaml_node["enabled"] = true;
+            procedure_yaml_node["enable"] = true;
           }
           yaml_list.push_back(procedure_yaml_node);
         } catch (const std::exception& e) {
@@ -1143,7 +1181,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
         auto procedure_yaml_file = entry.path().string();
         try {
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
-          procedure_yaml_node["enabled"] = false;
+          procedure_yaml_node["enable"] = false;
           yaml_list.push_back(procedure_yaml_node);
         } catch (const std::exception& e) {
           LOG(ERROR) << "Fail to load procedure yaml file: "

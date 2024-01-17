@@ -74,6 +74,8 @@ class WorkDirManipulator {
 
   static void ClearRunningGraph();
 
+  static void ClearLockFile();
+
   static std::string GetRunningGraph();
 
   /**
@@ -161,6 +163,8 @@ class WorkDirManipulator {
   static std::string GetGraphSchemaPath(const std::string& graph_name);
 
   static std::string GetGraphIndicesDir(const std::string& graph_name);
+
+  static std::string trim_graph_name(const std::string& graph_name);
 
  private:
   static gs::Result<seastar::sstring> create_procedure_sanity_check(

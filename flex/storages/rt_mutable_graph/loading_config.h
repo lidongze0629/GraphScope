@@ -62,13 +62,13 @@ static const std::unordered_set<std::string> CSV_META_KEY_WORDS = {
 class LoadingConfig;
 
 namespace config_parsing {
-bool parse_bulk_load_config_file(const std::string& config_file,
-                                 const Schema& schema,
-                                 LoadingConfig& load_config);
+Status parse_bulk_load_config_file(const std::string& config_file,
+                                   const Schema& schema,
+                                   LoadingConfig& load_config);
 
-bool parse_bulk_load_config_yaml(const YAML::Node& yaml_node,
-                                 const Schema& schema,
-                                 LoadingConfig& load_config);
+Status parse_bulk_load_config_yaml(const YAML::Node& yaml_node,
+                                   const Schema& schema,
+                                   LoadingConfig& load_config);
 }  // namespace config_parsing
 
 enum class BulkLoadMethod { kInit = 0, kOverwrite = 1 };
@@ -94,15 +94,16 @@ class LoadingConfig {
                 const std::string& format);
 
   // Add source files for vertex label. Each label can have multiple files.
-  bool AddVertexSources(const std::string& label, const std::string& file_path);
+  Status AddVertexSources(const std::string& label,
+                          const std::string& file_path);
 
   // Add source files for edge triplet. Each label can have multiple files.
   // When adding edge source files, src_id and dst_id column also need to be
   // specified.
-  bool AddEdgeSources(const std::string& src_label,
-                      const std::string& dst_label,
-                      const std::string& edge_label, size_t src_pri_key_ind,
-                      size_t dst_pri_key_ind, const std::string& file_path);
+  Status AddEdgeSources(const std::string& src_label,
+                        const std::string& dst_label,
+                        const std::string& edge_label, size_t src_pri_key_ind,
+                        size_t dst_pri_key_ind, const std::string& file_path);
 
   void SetScheme(const std::string& data_source);
   void SetDelimiter(const char& delimiter);
@@ -187,11 +188,11 @@ class LoadingConfig {
                      boost::hash<edge_triplet_type>>
       edge_src_dst_col_;
 
-  friend bool config_parsing::parse_bulk_load_config_file(
+  friend Status config_parsing::parse_bulk_load_config_file(
       const std::string& config_file, const Schema& schema,
       LoadingConfig& load_config);
 
-  friend bool config_parsing::parse_bulk_load_config_yaml(
+  friend Status config_parsing::parse_bulk_load_config_yaml(
       const YAML::Node& root, const Schema& schema, LoadingConfig& load_config);
 };
 
