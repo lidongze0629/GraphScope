@@ -198,7 +198,7 @@ class WorkDirManipulator {
 
   static bool ensure_graph_dir_exists(const std::string& graph_name);
 
-  static gs::Result<std::string> dump_graph_schema(
+  static gs::Result<seastar::sstring> dump_graph_schema(
       const YAML::Node& yaml_config, const std::string& graph_name);
 
   // Generate the procedure, return the generated yaml config.

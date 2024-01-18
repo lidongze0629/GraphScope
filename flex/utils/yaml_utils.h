@@ -32,6 +32,9 @@ Result<std::string> get_json_string_from_yaml(const std::string& file_path);
 
 Result<std::string> get_json_string_from_yaml(const YAML::Node& yaml_node);
 
+Status write_yaml_node_to_yaml_string(const YAML::Node& node,
+                                      YAML::Emitter& emitter);
+
 namespace config_parsing {
 template <typename T>
 bool get_scalar(YAML::Node node, const std::string& key, T& value) {

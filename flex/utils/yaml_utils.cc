@@ -15,6 +15,7 @@
  */
 
 #include "flex/utils/yaml_utils.h"
+#include <fstream>
 #include "nlohmann/json.hpp"
 namespace gs {
 std::vector<std::string> get_yaml_files(const std::string& plugin_dir) {
@@ -104,6 +105,46 @@ Result<std::string> get_json_string_from_yaml(const YAML::Node& node) {
   } catch (...) {
     return Result<std::string>(Status{StatusCode::IOError, "Unknown error"});
   }
+}
+
+Status write_yaml_node_to_yaml_string(const YAML::Node& node,
+                                      YAML::Emitter& emitter) {
+  if (node.IsNull()) {
+    emitter << YAML::Null;
+    return Status::OK();
+  }
+  try {
+    switch (node.Type()) {
+    case YAML::NodeType::Scalar: {
+      emitter << node.as<std::string>();
+      break;
+    }
+    case YAML::NodeType::Sequence: {
+      emitter << YAML::BeginSeq;
+      for (const auto& item : node) {
+        write_yaml_node_to_yaml_string(item, emitter);
+      }
+      emitter << YAML::EndSeq;
+      break;
+    }
+    case YAML::NodeType::Map: {
+      emitter << YAML::BeginMap;
+      for (const auto& pair : node) {
+        emitter << YAML::Key << pair.first.as<std::string>();
+        emitter << YAML::Value;
+        write_yaml_node_to_yaml_string(pair.second, emitter);
+      }
+      emitter << YAML::EndMap;
+      break;
+    }
+    default:
+      throw std::runtime_error("Unsupported YAML node type" + node.Type());
+      break;
+    }
+  } catch (const YAML::BadConversion& e) {
+    return Status{StatusCode::IOError, e.what()};
+  }
+  return Status::OK();
 }
 
 }  // namespace gs

@@ -113,12 +113,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::CreateGraph(
   }
   auto& schema = schema_result.value();
   // dump schema to file.
-  auto dump_res = dump_graph_schema(yaml_config, graph_name);
-  if (!dump_res.ok()) {
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::PermissionError,
-        "Fail to dump graph schema: " + dump_res.status().error_message()));
-  }
+  RETURN_IF_NOT_OK(dump_graph_schema(yaml_config, graph_name));
   VLOG(10) << "Successfully dump graph schema to file: " << graph_name << ", "
            << GetGraphSchemaPath(graph_name);
 
@@ -914,7 +909,7 @@ bool WorkDirManipulator::ensure_graph_dir_exists(
   return std::filesystem::exists(graph_path);
 }
 
-gs::Result<std::string> WorkDirManipulator::dump_graph_schema(
+gs::Result<seastar::sstring> WorkDirManipulator::dump_graph_schema(
     const YAML::Node& yaml_config, const std::string& graph_name) {
   if (!ensure_graph_dir_exists(graph_name)) {
     return {gs::Status(gs::StatusCode::PermissionError,
@@ -922,16 +917,10 @@ gs::Result<std::string> WorkDirManipulator::dump_graph_schema(
   }
   auto graph_path = GetGraphSchemaPath(graph_name);
   VLOG(10) << "Dump graph schema to file: " << graph_path;
-  std::ofstream fout(graph_path);
-  if (!fout.is_open()) {
-    return {gs::Status(gs::StatusCode::PermissionError, "Fail to open file")};
-  }
-  YAML::Emitter out;
-  out << yaml_config;
-  fout << out.c_str();
-  fout.close();
+  RETURN_IF_NOT_OK(dump_yaml_to_file(yaml_config, graph_path));
+
   VLOG(10) << "Successfully dump graph schema to file: " << graph_path;
-  return gs::Result<std::string>(gs::Status::OK());
+  return gs::Result<seastar::sstring>(gs::Status::OK());
 }
 
 gs::Result<std::string> WorkDirManipulator::LoadGraph(
@@ -1215,7 +1204,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
           }
           if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
                         proc_name) != runnable_procedures.end()) {
-            // only add the procedure yaml file that is in runnable_procedures.
+            // only add the procedure yaml file that is in
+            // runnable_procedures.
             procedure_yaml_node["runnable"] = true;
           }
 
@@ -1260,7 +1250,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
           auto proc_name = procedure_yaml_node["name"].as<std::string>();
           if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
                         proc_name) != runnable_procedures.end()) {
-            // only add the procedure yaml file that is in runnable_procedures.
+            // only add the procedure yaml file that is in
+            // runnable_procedures.
             procedure_yaml_node["runnable"] = true;
           }
           yaml_list.push_back(procedure_yaml_node);
@@ -1424,36 +1415,33 @@ gs::Result<seastar::sstring> WorkDirManipulator::disable_procedure_on_graph(
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::dump_yaml_to_file(
-    const YAML::Node& yaml_node, const std::string& procedure_yaml_file) {
+    const YAML::Node& yaml_node, const std::string& yaml_file) {
   try {
-    auto str = gs::get_json_string_from_yaml(yaml_node);
-    if (!str.ok()) {
-      return gs::Result<seastar::sstring>(
-          gs::Status(gs::StatusCode::InternalError,
-                     "Fail to dump yaml to string, error: " +
-                         str.status().error_message()));
+    YAML::Emitter emitter;
+    auto status = gs::write_yaml_node_to_yaml_string(yaml_node, emitter);
+    if (!status.ok()) {
+      return {status};
     }
-    std::ofstream fout(procedure_yaml_file);
+    std::ofstream fout(yaml_file);
     if (!fout.is_open()) {
       return gs::Result<seastar::sstring>(
           gs::Status(gs::StatusCode::InternalError,
-                     "Fail to open file: " + procedure_yaml_file +
+                     "Fail to open file: " + yaml_file +
                          ", error: " + std::string(std::strerror(errno))));
     }
-    fout << str.value();
+    fout << emitter.c_str();
     fout.close();
   } catch (const std::exception& e) {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
-                   "Fail to dump yaml to file: " + procedure_yaml_file +
+                   "Fail to dump yaml to file: " + yaml_file +
                        ", error: " + std::string(e.what())));
   } catch (...) {
-    return gs::Result<seastar::sstring>(
-        gs::Status(gs::StatusCode::InternalError,
-                   "Fail to dump yaml to file: " + procedure_yaml_file +
-                       ", unknown error"));
+    return gs::Result<seastar::sstring>(gs::Status(
+        gs::StatusCode::InternalError,
+        "Fail to dump yaml to file: " + yaml_file + ", unknown error"));
   }
-  LOG(INFO) << "Successfully dump yaml to file: " << procedure_yaml_file;
+  LOG(INFO) << "Successfully dump yaml to file: " << yaml_file;
   return gs::Result<seastar::sstring>(gs::Status::OK(), "Success");
 }
 
