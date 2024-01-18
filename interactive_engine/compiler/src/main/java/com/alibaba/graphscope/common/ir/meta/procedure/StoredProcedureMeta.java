@@ -36,6 +36,7 @@ public class StoredProcedureMeta {
     private static final RelDataTypeFactory typeFactory = new JavaTypeFactoryImpl();
 
     private final String name;
+    private final String queryStr;
     private final RelDataType returnType;
     private final List<Parameter> parameters;
     private final Mode mode;
@@ -44,12 +45,14 @@ public class StoredProcedureMeta {
 
     protected StoredProcedureMeta(
             String name,
+            String queryStr,
             Mode mode,
             String description,
             String extension,
             RelDataType returnType,
             List<Parameter> parameters) {
         this.name = name;
+        this.queryStr = queryStr;
         this.mode = mode;
         this.description = description;
         this.extension = extension;
@@ -58,9 +61,10 @@ public class StoredProcedureMeta {
     }
 
     public StoredProcedureMeta(
-            Configs configs, RelDataType returnType, List<Parameter> parameters) {
+            Configs configs, String queryStr, RelDataType returnType, List<Parameter> parameters) {
         this(
                 Config.NAME.get(configs),
+                queryStr,
                 Mode.valueOf(Config.MODE.get(configs)),
                 Config.DESCRIPTION.get(configs),
                 Config.EXTENSION.get(configs),
@@ -142,8 +146,12 @@ public class StoredProcedureMeta {
             return ImmutableBiMap.of(
                     "name",
                     meta.name,
+                    "type",
+                    "cypher",
                     "description",
                     meta.description,
+                    "query",
+                    meta.queryStr,
                     "mode",
                     meta.mode.name(),
                     "extension",
@@ -177,6 +185,7 @@ public class StoredProcedureMeta {
             Map<String, Object> config = yaml.load(inputStream);
             return new StoredProcedureMeta(
                     (String) config.get("name"),
+                    (String) config.get("query"),
                     Mode.valueOf((String) config.get("mode")),
                     (String) config.get("description"),
                     (String) config.get("extension"),

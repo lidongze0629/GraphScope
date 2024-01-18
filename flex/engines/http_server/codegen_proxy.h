@@ -80,10 +80,10 @@ class CodegenProxy {
       const physical::PhysicalPlan& plan);
 
   static seastar::future<int> CallCodegenCmd(
-      const std::string& plan_path, const std::string& query_name,
-      const std::string& work_dir, const std::string& output_dir,
-      const std::string& graph_schema_path, const std::string& engine_config,
-      const std::string& codegen_bin);
+      const std::string& codegen_bin, const std::string& plan_path,
+      const std::string& query_name, const std::string& work_dir,
+      const std::string& output_dir, const std::string& graph_schema_path,
+      const std::string& engine_config, const std::string& description = "");
 
  private:
   seastar::future<int> call_codegen_cmd(const physical::PhysicalPlan& plan);

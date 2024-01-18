@@ -475,6 +475,7 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
         "Fail to load graph plugin: " + plugin_file + ", error: " + e.what()));
   }
   plugin_node["enable"] = false;
+  plugin_node["bound_graph"] = graph_name;
 
   if (schema_node["stored_procedures"]) {
     auto procedure_node = schema_node["stored_procedures"];
@@ -925,7 +926,9 @@ gs::Result<std::string> WorkDirManipulator::dump_graph_schema(
   if (!fout.is_open()) {
     return {gs::Status(gs::StatusCode::PermissionError, "Fail to open file")};
   }
-  fout << yaml_config;
+  YAML::Emitter out;
+  out << yaml_config;
+  fout << out.c_str();
   fout.close();
   VLOG(10) << "Successfully dump graph schema to file: " << graph_path;
   return gs::Result<std::string>(gs::Status::OK());
@@ -1028,6 +1031,12 @@ seastar::future<seastar::sstring> WorkDirManipulator::generate_procedure(
   auto name = json["name"].get<std::string>();
   auto type = json["type"].get<std::string>();
   auto bounded_graph = json["bound_graph"].get<std::string>();
+  std::string procedure_desc;
+  if (json.contains("description")) {
+    procedure_desc = json["description"].get<std::string>();
+  } else {
+    procedure_desc = "";
+  }
   std::string query_file;
   if (type == "cypher" || type == "CYPHER") {
     query_file = temp_codegen_directory + "/" + name + ".cypher";
@@ -1062,9 +1071,9 @@ seastar::future<seastar::sstring> WorkDirManipulator::generate_procedure(
   }
   auto schema_path = GetGraphSchemaPath(bounded_graph);
 
-  return CodegenProxy::CallCodegenCmd(query_file, name, temp_codegen_directory,
-                                      output_dir, schema_path,
-                                      engine_config_path, codegen_bin)
+  return CodegenProxy::CallCodegenCmd(
+             codegen_bin, query_file, name, temp_codegen_directory, output_dir,
+             schema_path, engine_config_path, procedure_desc)
       .then_wrapped([name, output_dir](auto&& f) {
         try {
           auto res = f.get();
