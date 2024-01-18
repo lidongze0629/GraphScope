@@ -100,6 +100,8 @@ class hqps_http_handler {
 
   bool is_running() const;
 
+  bool is_actors_running() const;
+
   seastar::future<> stop_query_actors();
 
   void start_query_actors();

@@ -129,6 +129,13 @@ void HQPSService::run_and_wait_for_exit() {
 
 void HQPSService::set_exit_state() { running_.store(false); }
 
+bool HQPSService::is_actors_running() const {
+  if (query_hdl_) {
+    return query_hdl_->is_actors_running();
+  } else
+    return false;
+}
+
 seastar::future<> HQPSService::stop_query_actors() {
   std::unique_lock<std::mutex> lock(mtx_);
   if (query_hdl_) {

@@ -82,6 +82,8 @@ class HQPSService {
   // for each request.
   seastar::future<> stop_query_actors();
 
+  bool is_actors_running() const;
+
   // Actually create new actors with a different scope_id,
   // Because we don't know whether the previous scope_id can be reused.
   void start_query_actors();

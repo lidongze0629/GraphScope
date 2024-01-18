@@ -167,6 +167,10 @@ class WorkDirManipulator {
   static std::string trim_graph_name(const std::string& graph_name);
 
  private:
+  // Get the runnable procedures, i.e. the procedures are in current running
+  // graph's schema, and is already loaded.
+  static std::vector<std::string> get_runnable_procedures();
+
   static gs::Result<seastar::sstring> create_procedure_sanity_check(
       const nlohmann::json& json);
 
@@ -207,13 +211,15 @@ class WorkDirManipulator {
   // Get all the procedure yaml configs in plugins directory, add additional
   // enabled:false to each config.
   static gs::Result<seastar::sstring> get_all_procedure_yamls(
-      const std::string& graph_name);
+      const std::string& graph_name,
+      const std::vector<std::string>& runnable_procedures);
 
   // Get all the procedure yaml configs in plugins directory, add additional
   // enabled:true to enabled_list, add additional enabled:false to others.
   static gs::Result<seastar::sstring> get_all_procedure_yamls(
       const std::string& graph_name,
-      const std::vector<std::string>& enabled_list);
+      const std::vector<std::string>& enabled_list,
+      const std::vector<std::string>& runnable_procedures);
 
   static gs::Result<seastar::sstring> get_procedure_yaml(
       const std::string& graph_name, const std::string& procedure_names);

@@ -141,14 +141,31 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetGraphSchemaString(
         "Graph schema file is expected, but not exists: " + schema_file));
   }
   // read schema file and output to string
-  auto schema_str_res = gs::get_json_string_from_yaml(schema_file);
-  if (!schema_str_res.ok()) {
+  try {
+    auto schema_node = YAML::LoadFile(schema_file);
+    if (schema_node["schema"]) {
+      auto schema_str_res =
+          gs::get_json_string_from_yaml(schema_node["schema"]);
+      if (!schema_str_res.ok()) {
+        return gs::Result<seastar::sstring>(gs::Status(
+            gs::StatusCode::InvalidSchema,
+            "Failt to read schema file: " + schema_file +
+                ", error: " + schema_str_res.status().error_message()));
+      } else {
+        return gs::Result<seastar::sstring>(schema_str_res.value());
+      }
+    } else {
+      return gs::Result<seastar::sstring>(gs::Status(
+          gs::StatusCode::InvalidSchema,
+          "Schema field not found in schema file for " + graph_name));
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Fail to load graph schema from file: " << schema_file
+               << ", error: " << e.what();
     return gs::Result<seastar::sstring>(
-        gs::Status(gs::StatusCode::NotExists,
-                   "Failt to read schema file: " + schema_file +
-                       ", error: " + schema_str_res.status().error_message()));
-  } else {
-    return gs::Result<seastar::sstring>(schema_str_res.value());
+        gs::Status(gs::StatusCode::InternalError,
+                   "Fail to load graph schema from file: " + schema_file +
+                       ", for graph: " + graph_name + e.what()));
   }
 }
 
@@ -366,7 +383,16 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetProceduresByGraphName(
     return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::NotExists, "Graph not exists: " + graph_name));
   }
+  bool is_graph_running = WorkDirManipulator::GetRunningGraph() == graph_name;
   // get graph schema file, and get procedure lists.
+  std::vector<std::string> runnable_procedures;
+  if (is_graph_running) {
+    runnable_procedures = get_runnable_procedures();
+    LOG(INFO) << "The graph is running, get procedures from graph db: "
+              << graph_name << ", runnable procedure list: "
+              << gs::to_string(runnable_procedures);
+  }
+
   auto schema_file = GetGraphSchemaPath(graph_name);
   if (!std::filesystem::exists(schema_file)) {
     return gs::Result<seastar::sstring>(gs::Status(
@@ -393,14 +419,16 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetProceduresByGraphName(
         LOG(INFO) << "Enabled procedures found: " << graph_name
                   << ", schema file: " << schema_file
                   << ", procedure list: " << gs::to_string(procedure_list);
-        return get_all_procedure_yamls(graph_name, procedure_list);
+        return get_all_procedure_yamls(graph_name, procedure_list,
+                                       runnable_procedures);
       }
     }
   }
   LOG(INFO) << "No enabled procedures found: " << graph_name
             << ", schema file: " << schema_file;
   return get_all_procedure_yamls(
-      graph_name);  // should be all procedures, not enabled only.
+      graph_name,
+      runnable_procedures);  // should be all procedures, not enabled only.
 }
 
 gs::Result<seastar::sstring>
@@ -468,6 +496,22 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
                 << ", schema file: " << schema_file;
     }
   }
+  bool is_graph_running = WorkDirManipulator::GetRunningGraph() == graph_name;
+  // check runnabled
+  if (is_graph_running) {
+    auto runnable_procedures = get_runnable_procedures();
+    LOG(INFO) << "The graph is running, get procedures from graph db: "
+              << graph_name << ", runnable procedure list: "
+              << gs::to_string(runnable_procedures);
+    if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
+                  procedure_name) != runnable_procedures.end()) {
+      // add runnable: true to the plugin yaml.
+      plugin_node["runnable"] = true;
+    }
+  } else {
+    plugin_node["runnable"] = false;
+  }
+
   // yaml_list to string
   auto str = gs::get_json_string_from_yaml(plugin_node);
   if (!str.ok()) {
@@ -546,8 +590,8 @@ seastar::future<seastar::sstring> WorkDirManipulator::CreateProcedure(
           // and add to plugin list. this is critical, and should be
           // transactional.
           if (enable) {
-            LOG(INFO)
-                << "Procedure is enabled, add to graph schema and plugin list.";
+            LOG(INFO) << "Procedure is enabled, add to graph schema and "
+                         "plugin list.";
             return add_procedure_to_graph(json, res);
           } else {
             // Not enabled, do nothing.
@@ -930,6 +974,18 @@ gs::Result<std::string> WorkDirManipulator::LoadGraph(
       gs::Status::OK(), "Successfully load data to graph: " + graph_name);
 }
 
+std::vector<std::string> WorkDirManipulator::get_runnable_procedures() {
+  std::vector<std::string> runnable_procedures;
+  auto& db = gs::GraphDB::get();
+  auto& schema = db.schema();
+  auto procedures = schema.GetPlugins();
+  // insert keys to vector
+  for (const auto& procedure : procedures) {
+    runnable_procedures.push_back(procedure.first);
+  }
+  return runnable_procedures;
+}
+
 gs::Result<seastar::sstring> WorkDirManipulator::create_procedure_sanity_check(
     const nlohmann::json& json) {
   // check required fields is give.
@@ -1121,7 +1177,8 @@ seastar::future<seastar::sstring> WorkDirManipulator::add_procedure_to_graph(
 
 gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
     const std::string& graph_name,
-    const std::vector<std::string>& procedure_names) {
+    const std::vector<std::string>& procedure_names,
+    const std::vector<std::string>& runnable_procedures) {
   YAML::Node yaml_list;
   auto plugin_dir = get_graph_plugin_dir(graph_name);
   // iterate all .yamls in plugin_dir
@@ -1132,6 +1189,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
         try {
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
           procedure_yaml_node["enable"] = false;
+          procedure_yaml_node["runnable"] = false;
           if (!procedure_yaml_node["name"]) {
             LOG(ERROR) << "Procedure yaml file not contains name: "
                        << procedure_yaml_file;
@@ -1146,6 +1204,12 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
             // only add the procedure yaml file that is in procedure_names.
             procedure_yaml_node["enable"] = true;
           }
+          if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
+                        proc_name) != runnable_procedures.end()) {
+            // only add the procedure yaml file that is in runnable_procedures.
+            procedure_yaml_node["runnable"] = true;
+          }
+
           yaml_list.push_back(procedure_yaml_node);
         } catch (const std::exception& e) {
           LOG(ERROR) << "Fail to load procedure yaml file: "
@@ -1171,7 +1235,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
 
 // get all procedures for graph, all set to disabled.
 gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
-    const std::string& graph_name) {
+    const std::string& graph_name,
+    const std::vector<std::string>& runnable_procedures) {
   YAML::Node yaml_list;
   auto plugin_dir = get_graph_plugin_dir(graph_name);
   // iterate all .yamls in plugin_dir
@@ -1182,6 +1247,13 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
         try {
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
           procedure_yaml_node["enable"] = false;
+          procedure_yaml_node["runnable"] = false;
+          auto proc_name = procedure_yaml_node["name"].as<std::string>();
+          if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
+                        proc_name) != runnable_procedures.end()) {
+            // only add the procedure yaml file that is in runnable_procedures.
+            procedure_yaml_node["runnable"] = true;
+          }
           yaml_list.push_back(procedure_yaml_node);
         } catch (const std::exception& e) {
           LOG(ERROR) << "Fail to load procedure yaml file: "

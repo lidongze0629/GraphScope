@@ -295,6 +295,11 @@ uint16_t hqps_http_handler::get_port() const { return http_port_; }
 
 bool hqps_http_handler::is_running() const { return running_.load(); }
 
+bool hqps_http_handler::is_actors_running() const {
+  return !ic_handler_->is_current_scope_cancelled() &&
+         !adhoc_query_handler_->is_current_scope_cancelled();
+}
+
 void hqps_http_handler::start() {
   auto fut = seastar::alien::submit_to(
       *seastar::alien::internal::default_instance, 0, [this] {

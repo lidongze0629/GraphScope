@@ -401,7 +401,12 @@ seastar::future<query_result_v2> admin_actor::service_status(
   auto query_port = hqps_service.get_query_port();
   nlohmann::json res;
   if (query_port != 0) {
-    res["status"] = "running";
+    // res["status"] = "running";
+    if (hqps_service.is_actors_running()) {
+      res["status"] = "running";
+    } else {
+      res["status"] = "stopped";
+    }
     res["hqps_port"] = query_port;
     res["bolt_port"] = hqps_service.get_service_config().bolt_port;
     res["admin_port"] = hqps_service.get_service_config().admin_port;
