@@ -1188,6 +1188,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
           procedure_yaml_node["enable"] = false;
           procedure_yaml_node["runnable"] = false;
+          procedure_yaml_node["bound_graph"] = graph_name;
           if (!procedure_yaml_node["name"]) {
             LOG(ERROR) << "Procedure yaml file not contains name: "
                        << procedure_yaml_file;
@@ -1247,6 +1248,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::get_all_procedure_yamls(
           auto procedure_yaml_node = YAML::LoadFile(procedure_yaml_file);
           procedure_yaml_node["enable"] = false;
           procedure_yaml_node["runnable"] = false;
+          procedure_yaml_node["bound_graph"] = graph_name;
           auto proc_name = procedure_yaml_node["name"].as<std::string>();
           if (std::find(runnable_procedures.begin(), runnable_procedures.end(),
                         proc_name) != runnable_procedures.end()) {
