@@ -15,6 +15,7 @@
 
 #include "flex/engines/http_server/workdir_manipulator.h"
 #include "flex/engines/http_server/codegen_proxy.h"
+#include "flex/engines/http_server/service/hqps_service.h"
 #include "flex/storages/rt_mutable_graph/loading_config.h"
 
 // Write a macro to define the function, to check whether a filed presents in a
@@ -394,9 +395,10 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetProceduresByGraphName(
         gs::StatusCode::NotExists, "Graph not exists: " + graph_name));
   }
   bool is_graph_running = WorkDirManipulator::GetRunningGraph() == graph_name;
+  bool is_service_running = HQPSService::get().is_actors_running();
   // get graph schema file, and get procedure lists.
   std::vector<std::string> runnable_procedures;
-  if (is_graph_running) {
+  if (is_service_running && is_graph_running) {
     runnable_procedures = get_runnable_procedures();
     LOG(INFO) << "The graph is running, get procedures from graph db: "
               << graph_name << ", runnable procedure list: "
@@ -508,8 +510,9 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
     }
   }
   bool is_graph_running = WorkDirManipulator::GetRunningGraph() == graph_name;
+  bool is_service_running = HQPSService::get().is_actors_running();
   // check runnabled
-  if (is_graph_running) {
+  if (is_service_running && is_graph_running) {
     auto runnable_procedures = get_runnable_procedures();
     LOG(INFO) << "The graph is running, get procedures from graph db: "
               << graph_name << ", runnable procedure list: "

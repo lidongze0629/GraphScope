@@ -296,20 +296,33 @@ seastar::future<admin_query_result> admin_actor::update_procedure(
 // Start service on a graph first means stop all current running actors, then
 // switch graph and and create new actors with a unused scope_id.
 seastar::future<admin_query_result> admin_actor::restart_service(
-    query_param&& query_param) {
+    query_param&& payload) {
   // First Stop query_handler's actors.
 
   auto& hqps_service = HQPSService::get();
-  return hqps_service.stop_query_actors().then([this, &hqps_service] {
-    LOG(INFO) << "Successfully stopped query handler";
-    hqps_service.start_query_actors();  // start on a new scope.
-    LOG(INFO) << "Successfully restart query actors";
-    LOG(INFO) << "Successfully started service with graph: "
-              << WorkDirManipulator::GetRunningGraph();
-    return seastar::make_ready_future<admin_query_result>(
-        seastar::sstring("Successfully restart service on Graph: " +
-                         WorkDirManipulator::GetRunningGraph()));
-  });
+  return hqps_service.stop_query_actors()
+      .then([this, &hqps_service] {
+        LOG(INFO) << "Successfully stopped query handler, now start service on "
+                     "graph: "
+                  << WorkDirManipulator::GetRunningGraph();
+        return start_service(query_param{
+            seastar::sstring("{\"graph_name\":\"" +
+                             WorkDirManipulator::GetRunningGraph() + "\"}")});
+      })
+      .then_wrapped([this, &hqps_service](auto&& f) {
+        try {
+          auto res = f.get();
+          hqps_service.start_query_actors();  // start on a new scope.
+          LOG(INFO) << "Successfully restart query actors";
+          return seastar::make_ready_future<admin_query_result>(
+              admin_query_result{std::move(res)});
+        } catch (std::exception& e) {
+          LOG(ERROR) << "Fail to restart service: " << e.what();
+          return seastar::make_exception_future<admin_query_result>(
+              std::runtime_error("Fail to restart service: " +
+                                 std::string(e.what())));
+        }
+      });
 }
 
 // Start service on a graph first means stop all current running actors, then
@@ -410,7 +423,6 @@ seastar::future<admin_query_result> admin_actor::service_status(
   auto query_port = hqps_service.get_query_port();
   nlohmann::json res;
   if (query_port != 0) {
-    // res["status"] = "running";
     if (hqps_service.is_actors_running()) {
       res["status"] = "running";
     } else {
