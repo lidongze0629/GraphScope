@@ -75,6 +75,8 @@ int main(int argc, char** argv) {
   setenv("TZ", "Asia/Shanghai", 1);
   tzset();
 
+  double t = -grape::GetCurrentTime();
+
   auto schema_res = gs::Schema::LoadFromYaml(graph_schema_path);
   if (!schema_res.ok()) {
     LOG(ERROR) << "Fail to load graph schema file: "

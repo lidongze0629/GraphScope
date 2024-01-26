@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
   if (!schema.ok()) {
     LOG(FATAL) << "Failed to load schema: " << schema.status().error_message();
   }
-  gs::GraphDBConfig config(schema, data_path, shard_num);
+  gs::GraphDBConfig config(schema.value(), data_path, shard_num);
 #ifdef HUGEPAGE
   config.allocator_strategy = gs::MemoryStrategy::kHugepagePrefered;
   config.vertex_map_strategy = gs::MemoryStrategy::kHugepagePrefered;

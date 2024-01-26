@@ -518,6 +518,8 @@ WorkDirManipulator::GetProcedureByGraphAndProcedureName(
                   procedure_name) != runnable_procedures.end()) {
       // add runnable: true to the plugin yaml.
       plugin_node["runnable"] = true;
+    } else {
+      plugin_node["runnable"] = false;
     }
   } else {
     plugin_node["runnable"] = false;
@@ -537,8 +539,8 @@ seastar::future<seastar::sstring> WorkDirManipulator::CreateProcedure(
     const std::string& graph_name, const std::string& parameter,
     const std::string& engine_config_path) {
   if (!is_graph_exist(graph_name)) {
-    return seastar::make_ready_future<seastar::sstring>("Graph not exists: " +
-                                                        graph_name);
+    return seastar::make_exception_future<seastar::sstring>(
+        "Graph not exists: " + graph_name);
   }
   // check procedure exits
   auto plugin_dir = get_graph_plugin_dir(graph_name);
