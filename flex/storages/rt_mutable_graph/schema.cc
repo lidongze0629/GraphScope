@@ -410,6 +410,8 @@ static PropertyType StringToPropertyType(const std::string& str) {
     return PropertyType::kBool;
   } else if (str == "Date" || str == DT_DATE) {
     return PropertyType::kDate;
+  } else if (str == "Day" || str == DT_DAY) {
+    return PropertyType::kDay;
   } else if (str == "String" || str == DT_STRING) {
     // DT_STRING is a alias for VARCHAR(STRING_DEFAULT_MAX_LENGTH);
     return PropertyType::Varchar(PropertyType::STRING_DEFAULT_MAX_LENGTH);
@@ -457,6 +459,8 @@ StorageStrategy StringToStorageStrategy(const std::string& str) {
     return StorageStrategy::kNone;
   } else if (str == "Mem") {
     return StorageStrategy::kMem;
+  } else if (str == "Disk") {
+    return StorageStrategy::kDisk;
   } else {
     return StorageStrategy::kMem;
   }
@@ -480,6 +484,9 @@ static bool parse_property_type(YAML::Node node, PropertyType& type) {
   } else if (node["date"]) {
     auto format = node["date"].as<std::string>();
     prop_type_str = DT_DATE;
+  } else if (node["day"]) {
+    auto format = node["day"].as<std::string>();
+    prop_type_str = DT_DAY;
   } else {
     return false;
   }
@@ -644,6 +651,7 @@ static bool parse_vertex_schema(YAML::Node node, Schema& schema) {
     // remove primary key from properties.
     property_names.erase(property_names.begin() + primary_key_inds[i]);
     property_types.erase(property_types.begin() + primary_key_inds[i]);
+    strategies.erase(strategies.begin() + primary_key_inds[i]);
   }
 
   schema.add_vertex_label(label_name, property_types, property_names,
@@ -922,6 +930,10 @@ bool Schema::EmplacePlugins(
   uint8_t cur_plugin_id = RESERVED_PLUGIN_NUM;
   std::unordered_set<std::string> plugin_names;
   for (auto& f : plugin_paths_or_names) {
+    if (cur_plugin_id > MAX_PLUGIN_ID) {
+      LOG(ERROR) << "Too many plugins, max plugin id is " << MAX_PLUGIN_ID;
+      return false;
+    }
     if (std::filesystem::exists(f)) {
       plugin_name_to_path_and_id_.emplace(f,
                                           std::make_pair(f, cur_plugin_id++));
@@ -944,6 +956,10 @@ bool Schema::EmplacePlugins(
   // if there exists any plugins specified by name, add them
   // Iterator over the map, and add the plugin path and name to the vector
   for (auto cur_yaml : all_procedure_yamls) {
+    if (cur_plugin_id > MAX_PLUGIN_ID) {
+      LOG(ERROR) << "Too many plugins, max plugin id is " << MAX_PLUGIN_ID;
+      return false;
+    }
     YAML::Node root;
     try {
       root = YAML::LoadFile(cur_yaml);

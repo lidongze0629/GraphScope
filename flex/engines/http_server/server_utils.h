@@ -29,7 +29,7 @@ catch_exception_and_return_reply(std::unique_ptr<seastar::httpd::reply> rep,
 
 seastar::future<std::unique_ptr<seastar::httpd::reply>>
 return_reply_with_result(std::unique_ptr<seastar::httpd::reply> rep,
-                         query_result_v2&& result);
+                         admin_query_result&& result);
 
 }  // namespace server
 

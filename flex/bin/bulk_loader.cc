@@ -107,5 +107,8 @@ int main(int argc, char** argv) {
       parallelism);
   loader->LoadFragment();
 
+  t += grape::GetCurrentTime();
+  LOG(INFO) << "Finished bulk loading in " << t << " seconds.";
+
   return 0;
 }
