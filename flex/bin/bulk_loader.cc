@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 
@@ -24,6 +25,22 @@
 #include "flex/engines/http_server/options.h"
 
 namespace bpo = boost::program_options;
+
+static std::string work_dir;
+
+void signal_handler(int signal) {
+  LOG(INFO) << "Received signal " << signal << ", exiting...";
+  // support SIGKILL, SIGINT, SIGTERM
+  if (signal == SIGKILL || signal == SIGINT || signal == SIGTERM) {
+    LOG(ERROR) << "Received unexpected signal " << signal
+               << "Clearing directory: " << work_dir << ", exiting...";
+    gs::clear_tmp(work_dir);
+    exit(0);
+  } else {
+    LOG(ERROR) << "Received unexpected signal " << signal << ", exiting...";
+    exit(1);
+  }
+}
 
 int main(int argc, char** argv) {
   bpo::options_description desc("Usage:");
@@ -91,8 +108,15 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  work_dir = data_dir_path.string();
   auto loader = gs::LoaderFactory::CreateFragmentLoader(
       data_dir_path.string(), schema, loading_config, parallelism);
+
+  // Register handlers for SIGKILL, SIGINT, SIGTERM
+  std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
+  std::signal(SIGKILL, signal_handler);
+
   loader->LoadFragment();
 
   t += grape::GetCurrentTime();

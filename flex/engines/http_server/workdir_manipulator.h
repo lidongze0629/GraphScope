@@ -34,6 +34,20 @@
 
 namespace server {
 
+struct LockFile {
+  std::string graph_name;
+  std::string lock_path;
+  LockFile() = default;
+  LockFile(const std::string& graph_name, const std::string& lock_path)
+      : graph_name(graph_name), lock_path(lock_path) {}
+
+  ~LockFile() {
+    if (std::filesystem::exists(lock_path)) {
+      std::filesystem::remove(lock_path);
+    }
+  }
+};
+
 /**
  * @brief The class to manipulate the workspace. All methods are static.
  */
@@ -97,19 +111,9 @@ class WorkDirManipulator {
    * @param yaml_node The config of the graph.
    * @param loading_thread_num The number of threads to load the graph.
    */
-  static gs::Result<seastar::sstring> LoadGraph(const std::string& graph_name,
-                                                const YAML::Node& yaml_node,
-                                                int32_t loading_thread_num);
-
-  /**
-   * @brief Load a graph with a given name and config.
-   * @param yaml_config_file The config file of the graph.
-   * @param yaml_node The config of the graph.
-   * @param loading_thread_num The number of threads to load the graph.
-   */
-  static gs::Result<std::string> LoadGraph(const std::string& yaml_config_file,
-                                           const std::string& graph_name,
-                                           int32_t thread_num);
+  static gs::Result<int32_t> LoadGraph(
+      const std::string& graph_name, const YAML::Node& yaml_node,
+      int32_t loading_thread_num, std::atomic<int32_t>& bulk_loading_job_count);
 
   /**
    * @brief Get all procedures bound to the graph.
@@ -145,6 +149,17 @@ class WorkDirManipulator {
   static std::string GetGraphIndicesDir(const std::string& graph_name);
 
  private:
+  /**
+   * @brief Load a graph with a given name and config.
+   * @param yaml_config_file The config file of the graph.
+   * @param yaml_node The config of the graph.
+   * @param loading_thread_num The number of threads to load the graph.
+   */
+  static gs::Result<int32_t> load_graph_impl(
+      const std::string& yaml_config_file, const std::string& graph_name,
+      int32_t thread_num, std::atomic<int32_t>& bulk_loading_job_count,
+      LockFile&& lock_file);
+
   static gs::Result<seastar::sstring> create_procedure_sanity_check(
       const nlohmann::json& json);
 
@@ -166,7 +181,7 @@ class WorkDirManipulator {
 
   static bool is_graph_locked(const std::string& graph_name);
 
-  static bool try_lock_graph(const std::string& graph_name);
+  static gs::Result<LockFile> try_lock_graph(const std::string& graph_name);
 
   static void unlock_graph(const std::string& graph_name);
 

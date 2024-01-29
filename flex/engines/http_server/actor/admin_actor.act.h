@@ -20,6 +20,9 @@
 #include "flex/engines/http_server/service/hqps_service.h"
 #include "flex/engines/graph_db/database/graph_db.h"
 #include <mutex>
+#include <atomic>
+#include <unordered_map>
+#include <condition_variable>
 
 #include <hiactor/core/actor-template.hh>
 #include <hiactor/util/data_type.hh>
@@ -28,6 +31,7 @@ namespace server {
 
 class ANNOTATION(actor:impl) admin_actor : public hiactor::actor {
  public:
+  static constexpr int32_t MAX_BULK_LOADING_JOB_COUNT = 2;
   admin_actor(hiactor::actor_base* exec_ctx, const hiactor::byte_t* addr);
   ~admin_actor() override;
 
@@ -63,6 +67,7 @@ class ANNOTATION(actor:impl) admin_actor : public hiactor::actor {
 
  private:
   std::mutex mtx_;
+  std::atomic<int32_t> bulk_loading_job_count_; // current running bulk loading jobs
 };
 
 }  // namespace server

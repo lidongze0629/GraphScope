@@ -212,6 +212,23 @@ inline std::string tmp_dir(const std::string& work_dir) {
   return runtime_dir(work_dir) + "tmp/";
 }
 
+inline std::string bulk_load_dir(const std::string& work_dir) {
+  return tmp_dir(work_dir) + "bulk_load/";
+}
+
+inline std::string vertex_status_file(const std::string& work_dir,
+                                      const std::string& v_label_name) {
+  return bulk_load_dir(work_dir) + "vertex_" + v_label_name + ".status";
+}
+
+inline std::string edge_status_file(const std::string& work_dir,
+                                    const std::string& src_label_name,
+                                    const std::string& dst_label_name,
+                                    const std::string& edge_label_name) {
+  return bulk_load_dir(work_dir) + "edge_" + src_label_name + "_" +
+         edge_label_name + "_" + dst_label_name + ".status";
+}
+
 inline void clear_tmp(const std::string& work_dir) {
   std::string tmp_dir_str = tmp_dir(work_dir);
   if (std::filesystem::exists(tmp_dir_str)) {

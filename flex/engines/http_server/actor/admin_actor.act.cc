@@ -130,6 +130,16 @@ seastar::future<query_result> admin_actor::run_delete_graph(
 // load the graph.
 seastar::future<query_result> admin_actor::run_graph_loading(
     graph_management_param&& query_param) {
+  // wait until the number of bulk loading jobs is less than the max number
+  // of bulk loading jobs
+  while (bulk_loading_job_count_.load(std::memory_order_relaxed) >=
+         MAX_BULK_LOADING_JOB_COUNT) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+  // increase the number of bulk loading jobs
+  bulk_loading_job_count_.fetch_add(1, std::memory_order_relaxed);
+  LOG(INFO) << "Start loading graph, job count:  " << bulk_loading_job_count_;
+
   // query_param constains two parameter, first for graph name, second for graph
   // config
   auto content = query_param.content;
@@ -159,12 +169,13 @@ seastar::future<query_result> admin_actor::run_graph_loading(
   }
 
   auto graph_loading_res = server::WorkDirManipulator::LoadGraph(
-      graph_name, yaml, loading_thread_num);
+      graph_name, yaml, loading_thread_num, bulk_loading_job_count_);
 
   if (graph_loading_res.ok()) {
-    VLOG(10) << "Successfully loaded graph";
+    VLOG(10) << "Successfully loaded graph, process id: "
+             << graph_loading_res.value();
     return seastar::make_ready_future<query_result>(
-        std::move(graph_loading_res.value()));
+        seastar::sstring{"Successfully invoke graph loading"});
   } else {
     LOG(ERROR) << "Fail to load graph: "
                << graph_loading_res.status().error_message();

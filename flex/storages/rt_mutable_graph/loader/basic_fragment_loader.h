@@ -36,6 +36,17 @@ TypedMutableCsrBase<EDATA_T>* create_typed_csr(EdgeStrategy es,
   return nullptr;
 }
 
+enum class LoadingStatus {
+  kLoading = 0,
+  kLoaded = 1,
+  kCommited = 2,
+};
+
+// define << and >> for LoadingStatus
+std::ostream& operator<<(std::ostream& os, const LoadingStatus& status);
+
+std::istream& operator>>(std::istream& is, LoadingStatus& status);
+
 // FragmentLoader should use this BasicFragmentLoader to construct
 // mutable_csr_fragment.
 class BasicFragmentLoader {
@@ -68,6 +79,9 @@ class BasicFragmentLoader {
     build_lf_indexer<KEY_T, vid_t>(indexer, filename, lf_indexers_[v_label],
                                    snapshot_dir(work_dir_, 0),
                                    tmp_dir(work_dir_), type);
+    // update vertex_status file
+    set_vertex_loading_status(schema_.get_vertex_label_name(v_label),
+                              LoadingStatus::kLoaded);
   }
 
   template <typename EDATA_T>
@@ -159,6 +173,8 @@ class BasicFragmentLoader {
                                std::get<2>(edge));
       }
     }
+    set_edge_loading_status(src_label_name, dst_label_name, edge_label_name,
+                            LoadingStatus::kLoaded);
     VLOG(10) << "Finish adding edge batch of size: " << edges.size();
   }
 
@@ -171,6 +187,15 @@ class BasicFragmentLoader {
   const LFIndexer<vid_t>& GetLFIndexer(label_t v_label) const;
 
  private:
+  // create status files for each vertex label and edge triplet pair.
+  void set_vertex_loading_status(const std::string& label_name,
+                                 LoadingStatus status);
+
+  void set_edge_loading_status(const std::string& src_label_name,
+                               const std::string& dst_label_name,
+                               const std::string& edge_label_name,
+                               LoadingStatus status);
+  void init_loading_status_files();
   void init_vertex_data();
   const Schema& schema_;
   std::string work_dir_;
