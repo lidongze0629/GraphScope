@@ -717,6 +717,12 @@ gs::Result<seastar::sstring> WorkDirManipulator::DeleteProcedure(
         gs::StatusCode::InternalError,
         "Fail to remove plugin lib: " + plugin_lib + ", error: " + e.what()));
   }
+  // delete from gs schema's plugin list
+  auto& mutable_schema = gs::GraphDB::get().graph().mutable_schema();
+  mutable_schema.RemovePlugin(procedure_name);
+  LOG(INFO) << "Successfully delete procedure: " << procedure_name
+            << " on graph: " << graph_name;
+
   return gs::Result<seastar::sstring>(gs::Status::OK(),
                                       "Successfully delete procedure");
 }
@@ -988,10 +994,29 @@ gs::Result<std::string> WorkDirManipulator::LoadGraph(
 
 std::vector<std::string> WorkDirManipulator::get_runnable_procedures() {
   std::vector<std::string> runnable_procedures;
+  // auto& db = gs::GraphDB::get();
+  // auto& schema = db.schema();
+  // We don't get enable_list from current loaded schema, but from the file.
+  // The reason is that, deleted procedure will be removed from the schema in
+  // file, but still presents in db.schema(). The procedure in memory can only
+  // be removed the next time the graph is loaded.
+  // auto cur_running_graph = WorkDirManipulator::GetRunningGraph();
+  // auto schema_file = GetGraphSchemaPath(cur_running_graph);
+  // gs::Schema schema;
+  // try {
+  //   // auto schema_node = YAML::LoadFile(schema_file);
+  //   schema = gs::Schema::LoadFromYaml(schema_file).value();
+  // } catch (const std::exception& e) {
+  //   LOG(ERROR) << "Fail to load graph schema: " << schema_file
+  //              << ", error: " << e.what();
+  //   return runnable_procedures;
+  // }
+  // auto procedures = schema.GetPlugins();
   auto& db = gs::GraphDB::get();
   auto& schema = db.schema();
   auto procedures = schema.GetPlugins();
   // insert keys to vector
+  LOG(INFO) << "procedures read from schema: " << procedures.size();
   for (const auto& procedure : procedures) {
     runnable_procedures.push_back(procedure.first);
   }

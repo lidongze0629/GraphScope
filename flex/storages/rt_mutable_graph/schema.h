@@ -180,6 +180,8 @@ class Schema {
 
   void SetPluginDir(const std::string& plugin_dir);
 
+  void RemovePlugin(const std::string& plugin_name);
+
   std::string GetPluginDir() const;
 
  private:

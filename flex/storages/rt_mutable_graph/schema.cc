@@ -907,7 +907,6 @@ static bool parse_schema_config_file(const std::string& path, Schema& schema) {
   YAML::Node graph_node = YAML::LoadFile(path);
   // get the directory of path
   auto parent_dir = std::filesystem::path(path).parent_path().string();
-
   return parse_schema_from_yaml_node(graph_node, schema, parent_dir);
 }
 
@@ -1002,6 +1001,10 @@ bool Schema::EmplacePlugins(
 }
 
 void Schema::SetPluginDir(const std::string& dir) { plugin_dir_ = dir; }
+
+void Schema::RemovePlugin(const std::string& name) {
+  plugin_name_to_path_and_id_.erase(name);
+}
 
 std::string Schema::GetPluginDir() const { return plugin_dir_; }
 

@@ -254,13 +254,16 @@ seastar::future<admin_query_result> admin_actor::create_procedure(
 
 // Delete a procedure by graph name and procedure name
 seastar::future<admin_query_result> admin_actor::delete_procedure(
-    create_procedure_query_param&& query_param) {
-  auto& graph_name = query_param.content.first;
-  auto& procedure_name = query_param.content.second;
-  auto delete_procedure_res =
-      server::WorkDirManipulator::DeleteProcedure(graph_name, procedure_name);
+    create_procedure_query_param&& param) {
+  auto& graph_name = param.content.first;
+  auto& procedure_name = param.content.second;
+  gs::Result<seastar::sstring> delete_procedure_res;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    delete_procedure_res =
+        server::WorkDirManipulator::DeleteProcedure(graph_name, procedure_name);
+  }
   if (delete_procedure_res.ok()) {
-    VLOG(10) << "Successfully get all procedures";
     return seastar::make_ready_future<admin_query_result>(
         std::move(delete_procedure_res.value()));
   } else {
