@@ -115,20 +115,9 @@ class WorkDirManipulator {
    * @param yaml_node The config of the graph.
    * @param loading_thread_num The number of threads to load the graph.
    */
-  static gs::Result<seastar::sstring> LoadGraph(const std::string& graph_name,
-                                                const YAML::Node& yaml_node,
-                                                int32_t loading_thread_num);
-
-  /**
-   * @brief Load a graph with a given name and config.
-   * @param yaml_config_file The config file of the graph.
-   * @param yaml_node The config of the graph.
-   * @param loading_thread_num The number of threads to load the graph.
-   * @param overwrite Whether to overwrite the graph if it exists.
-   */
-  static gs::Result<std::string> LoadGraph(const std::string& yaml_config_file,
-                                           const std::string& graph_name,
-                                           int32_t thread_num, bool overwrite);
+  static gs::Result<int32_t> LoadGraph(
+      const std::string& graph_name, const YAML::Node& yaml_node,
+      int32_t loading_thread_num, std::atomic<int32_t>& bulk_loading_job_count);
 
   /**
    * @brief Get all procedures bound to the graph.
@@ -170,6 +159,16 @@ class WorkDirManipulator {
   // Get the runnable procedures, i.e. the procedures are in current running
   // graph's schema, and is already loaded.
   static std::vector<std::string> get_runnable_procedures();
+  /**
+   * @brief Load a graph with a given name and config.
+   * @param yaml_config_file The config file of the graph.
+   * @param yaml_node The config of the graph.
+   * @param loading_thread_num The number of threads to load the graph.
+   */
+  static gs::Result<int32_t> load_graph_impl(
+      const std::string& yaml_config_file, const std::string& graph_name,
+      int32_t thread_num, bool overwrite,
+      std::atomic<int32_t>& bulk_loading_job_count, LockFile&& lock_file);
 
   static gs::Result<seastar::sstring> create_procedure_sanity_check(
       const nlohmann::json& json);

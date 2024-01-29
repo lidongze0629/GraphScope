@@ -107,6 +107,9 @@ class Result {
   const Status& status() const noexcept { return status_; }
   ValueType& value() noexcept { return value_; }
 
+  // return rvalue
+  ValueType&& move_value() noexcept { return std::move(value_); }
+
  private:
   Status status_;
   ValueType value_;

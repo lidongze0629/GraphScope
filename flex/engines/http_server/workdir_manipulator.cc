@@ -13,9 +13,12 @@
  * limitations under the License.
  */
 
-#include "flex/engines/http_server/workdir_manipulator.h"
+#include <atomic>
+#include <boost/process.hpp>
+
 #include "flex/engines/http_server/codegen_proxy.h"
 #include "flex/engines/http_server/service/hqps_service.h"
+#include "flex/engines/http_server/workdir_manipulator.h"
 #include "flex/storages/rt_mutable_graph/loading_config.h"
 
 // Write a macro to define the function, to check whether a filed presents in a
@@ -301,36 +304,36 @@ gs::Result<seastar::sstring> WorkDirManipulator::DeleteGraph(
       gs::Status::OK(), "Successfully delete graph: " + graph_name);
 }
 
-gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
+gs::Result<int32_t> WorkDirManipulator::LoadGraph(
     const std::string& graph_name, const YAML::Node& yaml_node,
-    int32_t loading_thread_num) {
+    int32_t loading_thread_num, std::atomic<int>& bulk_loading_job_count) {
   // First check whether graph exists
   if (!is_graph_exist(graph_name)) {
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::NotExists, "Graph not exists: " + graph_name));
+    return gs::Result<int32_t>(gs::Status(gs::StatusCode::NotExists,
+                                          "Graph not exists: " + graph_name));
   }
   if (is_graph_locked(graph_name)) {
-    return gs::Result<seastar::sstring>(gs::Status(
+    return gs::Result<int32_t>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is locked: " + graph_name +
             ", either service is running on graph, or graph is loading"));
   }
   // Then check graph is already loaded
   if (is_graph_loaded(graph_name)) {
-    return gs::Result<seastar::sstring>(gs::Status(
+    return gs::Result<int32_t>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is already loaded, can not be loaded twice: " + graph_name));
   }
   // check is graph locked
   if (is_graph_running(graph_name)) {
-    return gs::Result<seastar::sstring>(gs::Status(
+    return gs::Result<int32_t>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is already running, can not be loaded: " + graph_name));
   }
   auto lock_res = try_lock_graph(graph_name);
   if (!lock_res.ok()) {
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::IllegalOperation, "Fail to lock graph: " + graph_name));
+    return gs::Result<int32_t>(gs::Status(gs::StatusCode::IllegalOperation,
+                                          "Fail to lock graph: " + graph_name));
   }
   // We use a local object to ensure the lock is released when the function
   // returns.
@@ -343,11 +346,11 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   try {
     auto schema_res = gs::Schema::LoadFromYaml(schema_file);
     if (!schema_res.ok()) {
-      return gs::Result<seastar::sstring>(schema_res.status());
+      return gs::Result<int32_t>(schema_res.status());
     }
     schema = schema_res.value();
   } catch (const std::exception& e) {
-    return gs::Result<seastar::sstring>(
+    return gs::Result<int32_t>(
         gs::Status(gs::StatusCode::InternalError,
                    "Fail to load graph schema: " + schema_file +
                        ", for graph: " + graph_name));
@@ -358,7 +361,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   auto loading_config_res =
       gs::LoadingConfig::ParseFromYamlNode(schema, yaml_node);
   if (!loading_config_res.ok()) {
-    return gs::Result<seastar::sstring>(
+    return gs::Result<int32_t>(
         gs::Status(gs::StatusCode::InternalError,
                    loading_config_res.status().error_message()));
   }
@@ -368,7 +371,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   auto temp_file_path = TMP_DIR + "/" + temp_file_name;
   auto dump_res = dump_yaml_to_file(yaml_node, temp_file_path);
   if (!dump_res.ok()) {
-    return gs::Result<seastar::sstring>(
+    return gs::Result<int32_t>(
         gs::Status(gs::StatusCode::InternalError,
                    "Fail to dump loading config to file: " + temp_file_path +
                        ", error: " + dump_res.status().error_message()));
@@ -377,15 +380,9 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   bool overwrite = loading_config.GetMethod() == gs::BulkLoadMethod::kOverwrite
                        ? true
                        : false;
-  auto res =
-      LoadGraph(temp_file_path, graph_name, loading_thread_num, overwrite);
-  if (!res.ok()) {
-    return gs::Result<seastar::sstring>(res.status());
-  }
-  // // unlock graph
-  // unlock_graph(graph_name);
-
-  return gs::Result<seastar::sstring>(res.status(), res.value());
+  return load_graph_impl(temp_file_path, graph_name, loading_thread_num,
+                         overwrite, bulk_loading_job_count,
+                         std::move(lock_res.move_value()));
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::GetProceduresByGraphName(
@@ -949,9 +946,11 @@ gs::Result<seastar::sstring> WorkDirManipulator::dump_graph_schema(
   return gs::Result<seastar::sstring>(gs::Status::OK());
 }
 
-gs::Result<std::string> WorkDirManipulator::LoadGraph(
+gs::Result<int32_t> WorkDirManipulator::load_graph_impl(
     const std::string& config_file_path, const std::string& graph_name,
-    int32_t loading_thread_num, bool overwrite) {
+    int32_t loading_thread_num, bool overwrite,
+    std::atomic<int>& bulk_loading_job_count, LockFile&& lock_file) {
+  // TODO: call GRAPH_LOADER_BIN.
   auto schema_file = GetGraphSchemaPath(graph_name);
   auto final_indices_dir = GetGraphIndicesDir(graph_name);
   std::string tmp_indices_dir;
@@ -968,28 +967,62 @@ gs::Result<std::string> WorkDirManipulator::LoadGraph(
                            config_file_path + " -d " + tmp_indices_dir + " " +
                            std::to_string(loading_thread_num);
   LOG(INFO) << "Call graph_loader: " << cmd_string;
-  auto res = std::system(cmd_string.c_str());
-  if (res != 0) {
-    return gs::Result<std::string>(
-        gs::Status(gs::StatusCode::InternalError,
-                   "Fail to load graph: " + graph_name +
-                       ", error code: " + std::to_string(res)));
-  }
-  // if overwrite, then remove final_indices_dir and rename tmp_indices_dir to
-  // final_indices_dir, otherwise, do nothing.
-  if (overwrite) {
-    LOG(INFO) << "Overwrite is true, rename tmp_indices_dir to "
-                 "final_indices_dir: "
-              << tmp_indices_dir << " -> " << final_indices_dir;
-    CHECK(std::filesystem::exists(tmp_indices_dir));
-    if (std::filesystem::exists(final_indices_dir)) {
-      std::filesystem::remove_all(final_indices_dir);
-    }
-    std::filesystem::rename(tmp_indices_dir, final_indices_dir);
+
+  // call the command asynchronizely
+  auto future = hiactor::thread_resource_pool::submit_work(
+      [cmd_string, lock_file = std::move(lock_file), &bulk_loading_job_count,
+       &tmp_indices_dir, &final_indices_dir, &overwrite]() {
+        auto res = std::system(cmd_string.c_str());
+        lock_file.~LockFile();
+        bulk_loading_job_count.fetch_sub(1);
+        LOG(INFO) << "Bulk loading job finished, job count: "
+                  << bulk_loading_job_count.load();
+        // if overwrite, then remove final_indices_dir and rename
+        // tmp_indices_dir to
+        // final_indices_dir, otherwise, do nothing.
+        if (overwrite) {
+          LOG(INFO) << "Overwrite is true, rename tmp_indices_dir to "
+                       "final_indices_dir: "
+                    << tmp_indices_dir << " -> " << final_indices_dir;
+          CHECK(std::filesystem::exists(tmp_indices_dir));
+          if (std::filesystem::exists(final_indices_dir)) {
+            std::filesystem::remove_all(final_indices_dir);
+          }
+          std::filesystem::rename(tmp_indices_dir, final_indices_dir);
+        }
+        return res;
+      });
+  // the future is never used.
+  // try to find the process id of the command
+  std::string pid_cmd_string =
+      "ps -ef | grep \'" + cmd_string + "\' | grep -v grep | awk '{print $2}'";
+  LOG(INFO) << "Call pid_cmd_string: " << pid_cmd_string;
+  // try to wait for 1 second, and check whether the process is still running.
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::string process_id;
+  {
+    boost::process::ipstream pipe_stream;
+    boost::process::child c(pid_cmd_string,
+                            boost::process::std_out > pipe_stream);
+    std::getline(pipe_stream, process_id);
+    LOG(INFO) << "Process id: " << process_id;  // we just want the first one.
+    c.wait();
   }
 
-  return gs::Result<std::string>(
-      gs::Status::OK(), "Successfully load data to graph: " + graph_name);
+  LOG(INFO) << "Successfully find process id for command: " << process_id;
+  // to int32_t
+  int32_t pid;
+  try {
+    pid = std::stoi(process_id);
+  } catch (const std::exception& e) {
+    return gs::Result<int32_t>(
+        gs::Status(gs::StatusCode::InternalError,
+                   "Fail to convert process id to int32_t: " + process_id +
+                       ", error: " + std::string(e.what())));
+  }
+
+  LOG(INFO) << "Successfully convert process id to int32_t: " << pid;
+  return gs::Result<int32_t>(pid);
 }
 
 std::vector<std::string> WorkDirManipulator::get_runnable_procedures() {
