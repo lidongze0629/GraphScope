@@ -82,7 +82,7 @@ seastar::future<admin_query_result> admin_actor::run_create_graph(
 // query_param is the graph name
 seastar::future<admin_query_result> admin_actor::run_get_graph_schema(
     query_param&& query_param) {
-  auto graph_name = WorkDirManipulator::trim_graph_name(query_param.content);
+  auto graph_name = WorkDirManipulator::trim_string(query_param.content);
   LOG(INFO) << "Get Graph schema for graph: " << graph_name;
 
   auto schema_result =
@@ -120,8 +120,7 @@ seastar::future<admin_query_result> admin_actor::run_list_graphs(
 // delete one graph
 seastar::future<admin_query_result> admin_actor::run_delete_graph(
     query_param&& query_param) {
-  auto delete_graph_name =
-      WorkDirManipulator::trim_graph_name(query_param.content);
+  auto delete_graph_name = WorkDirManipulator::trim_string(query_param.content);
 
   auto delete_res = server::WorkDirManipulator::DeleteGraph(delete_graph_name);
   if (delete_res.ok()) {
@@ -152,7 +151,7 @@ seastar::future<admin_query_result> admin_actor::run_graph_loading(
   // query_param constains two parameter, first for graph name, second for graph
   // config
   auto content = query_param.content;
-  auto graph_name = WorkDirManipulator::trim_graph_name(content.first);
+  auto graph_name = WorkDirManipulator::trim_string(content.first);
   // Remove the / from the start of the graph_name
 
   VLOG(1) << "Parse json payload for graph: " << graph_name;
@@ -184,9 +183,13 @@ seastar::future<admin_query_result> admin_actor::run_graph_loading(
       graph_name, yaml, loading_thread_num, bulk_loading_job_count_);
 
   if (graph_loading_res.ok()) {
-    VLOG(10) << "Successfully loaded graph";
+    auto process_id = graph_loading_res.value();
+    VLOG(10) << "Successfully invoke graph loading, jobid(processid): "
+             << process_id;
+    //"{\"job_id\":" + std::to_string(process_id) + "}"
+    seastar::sstring res = "{\"job_id\":" + std::to_string(process_id) + "}";
     return seastar::make_ready_future<admin_query_result>(
-        gs::Result{seastar::sstring{"Successfully loaded graph"}});
+        gs::Result{std::move(res)});
   } else {
     LOG(ERROR) << "Fail to load graph: "
                << graph_loading_res.status().error_message();
@@ -478,6 +481,51 @@ seastar::future<admin_query_result> admin_actor::node_status(
   }
   return seastar::make_ready_future<admin_query_result>(
       seastar::sstring(json.dump()));
+}
+
+///////////////////////// Job related /////////////////////////
+seastar::future<admin_query_result> admin_actor::get_job(
+    query_param&& query_param) {
+  auto& job_id = query_param.content;
+  auto job_res = server::WorkDirManipulator::GetJob(job_id);
+  if (job_res.ok()) {
+    VLOG(10) << "Successfully get job: " << job_id;
+    return seastar::make_ready_future<admin_query_result>(
+        admin_query_result{std::move(job_res)});
+  } else {
+    LOG(ERROR) << "Fail to get job: " << job_id
+               << ", error message: " << job_res.status().error_message();
+    return seastar::make_ready_future<admin_query_result>(job_res.status());
+  }
+}
+
+seastar::future<admin_query_result> admin_actor::list_jobs(
+    query_param&& query_param) {
+  auto list_res = server::WorkDirManipulator::ListJobs();
+  if (list_res.ok()) {
+    VLOG(10) << "Successfully list jobs";
+    return seastar::make_ready_future<admin_query_result>(
+        admin_query_result{std::move(list_res)});
+  } else {
+    LOG(ERROR) << "Fail to list jobs: " << list_res.status().error_message();
+    return seastar::make_ready_future<admin_query_result>(list_res.status());
+  }
+}
+
+// cancel job
+seastar::future<admin_query_result> admin_actor::cancel_job(
+    query_param&& query_param) {
+  auto& job_id = query_param.content;
+  auto cancel_res = server::WorkDirManipulator::CancelJob(job_id);
+  if (cancel_res.ok()) {
+    VLOG(10) << "Successfully cancel job: " << job_id;
+    return seastar::make_ready_future<admin_query_result>(
+        admin_query_result{std::move(cancel_res)});
+  } else {
+    LOG(ERROR) << "Fail to cancel job: " << job_id
+               << ", error message: " << cancel_res.status().error_message();
+    return seastar::make_ready_future<admin_query_result>(cancel_res.status());
+  }
 }
 
 }  // namespace server

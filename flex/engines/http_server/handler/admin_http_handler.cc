@@ -203,12 +203,12 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
       auto graph_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+          WorkDirManipulator::trim_string(req->param.at("graph_name"));
       // remove / from the graph_name
       if (req->param.exists("procedure_name")) {
         // Get the procedures
-        auto procedure_name = WorkDirManipulator::trim_graph_name(
-            req->param.at("procedure_name"));
+        auto procedure_name =
+            WorkDirManipulator::trim_string(req->param.at("procedure_name"));
         LOG(INFO) << "Get procedure for: " << graph_name << ", "
                   << procedure_name;
         auto pair = std::make_pair(graph_name, procedure_name);
@@ -252,7 +252,7 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
       auto graph_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+          WorkDirManipulator::trim_string(req->param.at("graph_name"));
       // remove / from the graph_name
       LOG(INFO) << "Creating procedure for: " << graph_name;
       return admin_actor_refs_[dst_executor]
@@ -281,9 +281,9 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
       auto graph_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+          WorkDirManipulator::trim_string(req->param.at("graph_name"));
       auto procedure_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("procedure_name"));
+          WorkDirManipulator::trim_string(req->param.at("procedure_name"));
       LOG(INFO) << "Deleting procedure for: " << graph_name << ", "
                 << procedure_name;
       return admin_actor_refs_[dst_executor]
@@ -311,9 +311,9 @@ class admin_http_procedure_handler_impl : public seastar::httpd::handler_base {
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
       auto graph_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("graph_name"));
+          WorkDirManipulator::trim_string(req->param.at("graph_name"));
       auto procedure_name =
-          WorkDirManipulator::trim_graph_name(req->param.at("procedure_name"));
+          WorkDirManipulator::trim_string(req->param.at("procedure_name"));
       LOG(INFO) << "Update procedure for: " << graph_name << ", "
                 << procedure_name;
       return admin_actor_refs_[dst_executor]
@@ -379,8 +379,7 @@ class admin_http_service_handler_impl : public seastar::httpd::handler_base {
         return seastar::make_ready_future<
             std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
       }
-      auto action =
-          WorkDirManipulator::trim_graph_name(req->param.at("action"));
+      auto action = WorkDirManipulator::trim_string(req->param.at("action"));
       LOG(INFO) << "POST with action: " << action;
       if (action == "start") {
         return admin_actor_refs_[dst_executor]
@@ -505,6 +504,99 @@ class admin_http_node_handler_impl : public seastar::httpd::handler_base {
   std::vector<admin_actor_ref> admin_actor_refs_;
 };
 
+class admin_http_job_handler_impl : public seastar::httpd::handler_base {
+ public:
+  admin_http_job_handler_impl(uint32_t group_id, uint32_t shard_concurrency)
+      : shard_concurrency_(shard_concurrency), executor_idx_(0) {
+    admin_actor_refs_.reserve(shard_concurrency_);
+    hiactor::scope_builder builder;
+    builder.set_shard(hiactor::local_shard_id())
+        .enter_sub_scope(hiactor::scope<executor_group>(0))
+        .enter_sub_scope(hiactor::scope<hiactor::actor_group>(group_id));
+    for (unsigned i = 0; i < shard_concurrency_; ++i) {
+      admin_actor_refs_.emplace_back(builder.build_ref<admin_actor_ref>(i));
+    }
+  }
+  ~admin_http_job_handler_impl() override = default;
+
+  seastar::future<std::unique_ptr<seastar::httpd::reply>> handle(
+      const seastar::sstring& path,
+      std::unique_ptr<seastar::httpd::request> req,
+      std::unique_ptr<seastar::httpd::reply> rep) override {
+    auto dst_executor = executor_idx_;
+
+    executor_idx_ = (executor_idx_ + 1) % shard_concurrency_;
+    LOG(INFO) << "Handling path:" << path << ", method: " << req->_method;
+    auto& method = req->_method;
+    if (method == "GET") {
+      if (req->param.exists("jobId")) {
+        auto job_id = WorkDirManipulator::trim_string(req->param.at("jobId"));
+        LOG(INFO) << "GET job with jobId: " << job_id;
+        return admin_actor_refs_[dst_executor]
+            .get_job(query_param{std::move(job_id)})
+            .then_wrapped(
+                [rep = std::move(rep)](
+                    seastar::future<admin_query_result>&& fut) mutable {
+                  if (__builtin_expect(fut.failed(), false)) {
+                    return catch_exception_and_return_reply(
+                        std::move(rep), fut.get_exception());
+                  }
+                  return return_reply_with_result(std::move(rep),
+                                                  std::move(fut.get0()));
+                });
+      } else {
+        LOG(INFO) << "GET all jobs";
+        return admin_actor_refs_[dst_executor]
+            .list_jobs(query_param{std::move(req->content)})
+            .then_wrapped(
+                [rep = std::move(rep)](
+                    seastar::future<admin_query_result>&& fut) mutable {
+                  if (__builtin_expect(fut.failed(), false)) {
+                    return catch_exception_and_return_reply(
+                        std::move(rep), fut.get_exception());
+                  }
+                  return return_reply_with_result(std::move(rep),
+                                                  std::move(fut.get0()));
+                });
+      }
+    } else if (method == "DELETE") {
+      LOG(INFO) << "DELETE job";
+      if (!req->param.exists("jobId")) {
+        rep->set_status(seastar::httpd::reply::status_type::bad_request);
+        rep->write_body("application/json",
+                        seastar::sstring("expect field 'jobId' in request"));
+        rep->done();
+        return seastar::make_ready_future<
+            std::unique_ptr<seastar::httpd::reply>>(std::move(rep));
+      }
+      auto job_id = WorkDirManipulator::trim_string(req->param.at("jobId"));
+      return admin_actor_refs_[dst_executor]
+          .cancel_job(query_param{std::move(job_id)})
+          .then_wrapped([rep = std::move(rep)](
+                            seastar::future<admin_query_result>&& fut) mutable {
+            if (__builtin_expect(fut.failed(), false)) {
+              return catch_exception_and_return_reply(std::move(rep),
+                                                      fut.get_exception());
+            }
+            return return_reply_with_result(std::move(rep),
+                                            std::move(fut.get0()));
+          });
+    } else {
+      rep->set_status(seastar::httpd::reply::status_type::bad_request);
+      rep->write_body("application/json",
+                      seastar::sstring("Unsupported method: ") + method);
+      rep->done();
+      return seastar::make_ready_future<std::unique_ptr<seastar::httpd::reply>>(
+          std::move(rep));
+    }
+  }
+
+ private:
+  const uint32_t shard_concurrency_;
+  uint32_t executor_idx_;
+  std::vector<admin_actor_ref> admin_actor_refs_;
+};
+
 admin_http_handler::admin_http_handler(uint16_t http_port)
     : http_port_(http_port) {}
 
@@ -543,6 +635,9 @@ seastar::future<> admin_http_handler::set_routes() {
 
     auto node_handler = new admin_http_node_handler_impl(
         interactive_admin_group_id, shard_admin_node_concurrency);
+
+    auto job_handler = new admin_http_job_handler_impl(
+        interactive_admin_group_id, shard_admin_job_concurrency);
 
     ////Procedure management ///
     {
@@ -608,6 +703,19 @@ seastar::future<> admin_http_handler::set_routes() {
 
       r.add(seastar::httpd::operation_type::GET,
             seastar::httpd::url("/v1/service/status"), service_handler);
+    }
+
+    {
+      // job request handling.
+      r.add(seastar::httpd::operation_type::GET, seastar::httpd::url("/v1/job"),
+            job_handler);
+      auto match_rule = new seastar::httpd::match_rule(job_handler);
+
+      match_rule->add_str("/v1/job").add_param("jobId");
+      r.add(match_rule, seastar::httpd::operation_type::GET);
+
+      r.add(seastar::httpd::operation_type::DELETE,
+            seastar::httpd::url("/v1/job").remainder("jobId"), job_handler);
     }
 
     {

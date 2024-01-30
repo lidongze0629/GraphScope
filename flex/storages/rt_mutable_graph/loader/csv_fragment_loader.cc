@@ -655,6 +655,8 @@ void CSVFragmentLoader::loadEdges() {
 
 void CSVFragmentLoader::LoadFragment() {
   loadVertices();
+  // sleep 30s
+  std::this_thread::sleep_for(std::chrono::seconds(30));
   loadEdges();
 
   basic_fragment_loader_.LoadFragment();

@@ -67,6 +67,13 @@ class WorkDirManipulator {
   static const std::string RUNNING_GRAPH_FILE_NAME;
   static const std::string TMP_DIR;
   static const std::string GRAPH_LOADER_BIN;
+  static const std::string EXIT_CODE_FILE_NAME;
+  static const std::string GRAPH_NAME_FILE_NAME;
+  static const std::string JOB_STATUS_FILE_NAME;
+  static const std::string JOB_LOG_FILE_NAME;
+  static const std::string JOB_TMP_LOG_FILE_NAME;
+  static const std::string START_TIME_FILE_NAME;
+  static const std::string END_TIME_FILE_NAME;
 
   static void SetWorkspace(const std::string& workspace_path);
 
@@ -153,9 +160,39 @@ class WorkDirManipulator {
 
   static std::string GetGraphIndicesDir(const std::string& graph_name);
 
-  static std::string trim_graph_name(const std::string& graph_name);
+  static std::string trim_string(const std::string& graph_name);
+
+  // job related
+  static gs::Result<seastar::sstring> GetJob(const std::string& job_id);
+
+  // get all jobs, including running and finished
+  static gs::Result<seastar::sstring> ListJobs();
+
+  static gs::Result<seastar::sstring> CancelJob(const std::string& job_id);
 
  private:
+  static std::string get_job_dir(const int32_t job_id);
+
+  static gs::Result<std::string> create_job_dir(const int32_t job_id);
+
+  static std::string get_job_meta(int32_t job_id, const std::string& file_name,
+                                  const std::string& default_value);
+
+  static std::string get_file_content(const std::string& file_name,
+                                      int32_t last_lines_limit);
+
+  static void init_job_meta(const std::string& graph_name, int32_t pid,
+                            const std::string& tmp_log_file);
+  static void update_job_meta(const std::string& graph_name, int32_t pid,
+                              const std::string& tmp_job_log,
+                              int32_t exit_code);
+
+  // When a job is canceled, update the job meta
+  static void update_cancelled_job_meta(int32_t pid);
+
+  static std::string get_tmp_bulk_loading_job_log_path(
+      const std::string& graph_name);
+
   // Get the runnable procedures, i.e. the procedures are in current running
   // graph's schema, and is already loaded.
   static std::vector<std::string> get_runnable_procedures();
