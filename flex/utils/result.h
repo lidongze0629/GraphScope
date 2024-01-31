@@ -70,6 +70,19 @@ class Status {
     }                          \
   } while (0)
 
+// a macro automatically assign the return value of a function, which returns
+// result to a variable, and check the status of the result, if ok, continue to
+// execute, otherwise, return the status. the macro accept the calling code of a
+// function, the function name, and the variable name.
+#define ASSIGN_AND_RETURN_IF_NOT_OK(var, expr) \
+  do {                                         \
+    auto status = (expr);                      \
+    if (!status.ok()) {                        \
+      return status;                           \
+    }                                          \
+    var = status.move_value();                 \
+  } while (0)
+
 // Define a class with name Result<T>, which is a template class
 // Stores the result of a function that may fail.
 // If the function succeeds, the result contains the value returned by the

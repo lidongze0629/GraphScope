@@ -122,7 +122,7 @@ class WorkDirManipulator {
    * @param yaml_node The config of the graph.
    * @param loading_thread_num The number of threads to load the graph.
    */
-  static gs::Result<int32_t> LoadGraph(
+  static gs::Result<seastar::sstring> LoadGraph(
       const std::string& graph_name, const YAML::Node& yaml_node,
       int32_t loading_thread_num, std::atomic<int32_t>& bulk_loading_job_count);
 
@@ -163,32 +163,41 @@ class WorkDirManipulator {
   static std::string trim_string(const std::string& graph_name);
 
   // job related
-  static gs::Result<seastar::sstring> GetJob(const std::string& job_id);
+  static gs::Result<seastar::sstring> GetJob(const seastar::sstring& job_id);
 
   // get all jobs, including running and finished
   static gs::Result<seastar::sstring> ListJobs();
 
-  static gs::Result<seastar::sstring> CancelJob(const std::string& job_id);
+  static gs::Result<seastar::sstring> CancelJob(const seastar::sstring& job_id);
 
  private:
-  static std::string get_job_dir(const int32_t job_id);
+  // the job_id is a string, in format job_{timestamp}_{graph_name}_{pid}
+  // the timestamp is the time when the job is created,the graph_name is the
+  // name of the graph,the pid is the process id of the job
+  // So the jobId must be unique.
+  // Before call this method, make sure the job_meta is initialized.
+  static gs::Result<seastar::sstring> create_job(
+      const std::string& graph_name, int64_t time_stamp, int32_t pid,
+      const std::string& tmp_log_path);
+  static std::string get_job_dir(const std::string& job_id);
 
-  static gs::Result<std::string> create_job_dir(const int32_t job_id);
-
-  static std::string get_job_meta(int32_t job_id, const std::string& file_name,
+  static std::string get_job_meta(const std::string& job_id,
+                                  const std::string& file_name,
                                   const std::string& default_value);
+
+  static void update_job_meta(const std::string& job_id,
+                              const std::string& tmp_job_log,
+                              int32_t exit_code);
+
+  static gs::Result<int32_t> get_pid_from_job_id(const std::string& job_id);
+
+  static std::string get_start_time_from_job_id(const std::string& job_id);
 
   static std::string get_file_content(const std::string& file_name,
                                       int32_t last_lines_limit);
 
-  static void init_job_meta(const std::string& graph_name, int32_t pid,
-                            const std::string& tmp_log_file);
-  static void update_job_meta(const std::string& graph_name, int32_t pid,
-                              const std::string& tmp_job_log,
-                              int32_t exit_code);
-
   // When a job is canceled, update the job meta
-  static void update_cancelled_job_meta(int32_t pid);
+  static void update_cancelled_job_meta(const std::string& pid);
 
   static std::string get_tmp_bulk_loading_job_log_path(
       const std::string& graph_name);
@@ -202,7 +211,7 @@ class WorkDirManipulator {
    * @param yaml_node The config of the graph.
    * @param loading_thread_num The number of threads to load the graph.
    */
-  static gs::Result<int32_t> load_graph_impl(
+  static gs::Result<seastar::sstring> load_graph_impl(
       const std::string& yaml_config_file, const std::string& graph_name,
       int32_t thread_num, bool overwrite,
       std::atomic<int32_t>& bulk_loading_job_count, LockFile&& lock_file);

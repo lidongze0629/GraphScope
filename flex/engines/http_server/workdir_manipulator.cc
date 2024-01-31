@@ -313,36 +313,36 @@ gs::Result<seastar::sstring> WorkDirManipulator::DeleteGraph(
       gs::Status::OK(), "Successfully delete graph: " + graph_name);
 }
 
-gs::Result<int32_t> WorkDirManipulator::LoadGraph(
+gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
     const std::string& graph_name, const YAML::Node& yaml_node,
     int32_t loading_thread_num, std::atomic<int>& bulk_loading_job_count) {
   // First check whether graph exists
   if (!is_graph_exist(graph_name)) {
-    return gs::Result<int32_t>(gs::Status(gs::StatusCode::NotExists,
-                                          "Graph not exists: " + graph_name));
+    return gs::Result<seastar::sstring>(gs::Status(
+        gs::StatusCode::NotExists, "Graph not exists: " + graph_name));
   }
   if (is_graph_locked(graph_name)) {
-    return gs::Result<int32_t>(gs::Status(
+    return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is locked: " + graph_name +
             ", either service is running on graph, or graph is loading"));
   }
   // Then check graph is already loaded
   if (is_graph_loaded(graph_name)) {
-    return gs::Result<int32_t>(gs::Status(
+    return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is already loaded, can not be loaded twice: " + graph_name));
   }
   // check is graph locked
   if (is_graph_running(graph_name)) {
-    return gs::Result<int32_t>(gs::Status(
+    return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::IllegalOperation,
         "Graph is already running, can not be loaded: " + graph_name));
   }
   auto lock_res = try_lock_graph(graph_name);
   if (!lock_res.ok()) {
-    return gs::Result<int32_t>(gs::Status(gs::StatusCode::IllegalOperation,
-                                          "Fail to lock graph: " + graph_name));
+    return gs::Result<seastar::sstring>(gs::Status(
+        gs::StatusCode::IllegalOperation, "Fail to lock graph: " + graph_name));
   }
   // We use a local object to ensure the lock is released when the function
   // returns.
@@ -355,11 +355,11 @@ gs::Result<int32_t> WorkDirManipulator::LoadGraph(
   try {
     auto schema_res = gs::Schema::LoadFromYaml(schema_file);
     if (!schema_res.ok()) {
-      return gs::Result<int32_t>(schema_res.status());
+      return gs::Result<seastar::sstring>(schema_res.status());
     }
     schema = schema_res.value();
   } catch (const std::exception& e) {
-    return gs::Result<int32_t>(
+    return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
                    "Fail to load graph schema: " + schema_file +
                        ", for graph: " + graph_name));
@@ -370,7 +370,7 @@ gs::Result<int32_t> WorkDirManipulator::LoadGraph(
   auto loading_config_res =
       gs::LoadingConfig::ParseFromYamlNode(schema, yaml_node);
   if (!loading_config_res.ok()) {
-    return gs::Result<int32_t>(
+    return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
                    loading_config_res.status().error_message()));
   }
@@ -380,7 +380,7 @@ gs::Result<int32_t> WorkDirManipulator::LoadGraph(
   auto temp_file_path = TMP_DIR + "/" + temp_file_name;
   auto dump_res = dump_yaml_to_file(yaml_node, temp_file_path);
   if (!dump_res.ok()) {
-    return gs::Result<int32_t>(
+    return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
                    "Fail to dump loading config to file: " + temp_file_path +
                        ", error: " + dump_res.status().error_message()));
@@ -955,7 +955,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::dump_graph_schema(
   return gs::Result<seastar::sstring>(gs::Status::OK());
 }
 
-gs::Result<int32_t> WorkDirManipulator::load_graph_impl(
+gs::Result<seastar::sstring> WorkDirManipulator::load_graph_impl(
     const std::string& config_file_path, const std::string& graph_name,
     int32_t loading_thread_num, bool overwrite,
     std::atomic<int>& bulk_loading_job_count, LockFile&& lock_file) {
@@ -982,13 +982,13 @@ gs::Result<int32_t> WorkDirManipulator::load_graph_impl(
   LOG(INFO) << "Call graph_loader: " << cmd_string;
 
   // call the command asynchronously
-  volatile int32_t pid = 0;
+  std::string job_id;
   hiactor::thread_resource_pool::submit_work(
       [cmd_string, lock_file = std::move(lock_file),
        tmp_indices_dir = std::move(tmp_indices_dir),
        final_indices_dir = std::move(final_indices_dir),
        graph_name = std::move(graph_name), overwrite = std::move(overwrite),
-       bulk_loading_job_log = std::move(bulk_loading_job_log), &pid,
+       bulk_loading_job_log = std::move(bulk_loading_job_log), &job_id,
        &bulk_loading_job_count]() {
         // pass pid as reference is ok, since we will block until pid is not 0.
         // pass bulk_loading_job_count as reference is ok, since we it is
@@ -1000,25 +1000,29 @@ gs::Result<int32_t> WorkDirManipulator::load_graph_impl(
         boost::process::child child_handle(
             cmd_string, boost::process::std_out > bulk_loading_job_log,
             boost::process::std_err > bulk_loading_job_log);
-        pid = child_handle.id();
+        auto internal_pid = child_handle.id();
         // create a copy inside, so even pid is released after function return,
         // we still know the pid.
-        auto pid_copied = pid;
-        LOG(INFO) << "Successfully call graph_loader, pid: " << pid_copied;
         // create init job status
-        if (!create_job_dir(pid_copied).ok()) {
-          LOG(ERROR) << "Fail to create job dir: " << pid_copied;
-          return -1;
-        }
-        init_job_meta(graph_name, pid_copied, bulk_loading_job_log);
+        // get current time
+        auto create_time =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch());
+        std::string internal_job_id;
+        ASSIGN_AND_RETURN_IF_NOT_OK(
+            internal_job_id, create_job(graph_name, create_time.count(),
+                                        internal_pid, bulk_loading_job_log));
+        LOG(INFO) << "Successfully create job: " << internal_job_id;
+        // after job meta is created, we can let the parent process continue.
+        job_id = internal_job_id;
         child_handle.wait();
         // get child exit code
         auto res = child_handle.exit_code();
         // logFile.close();
-        LOG(INFO) << "Graph loader finished, pid: " << pid_copied
+        LOG(INFO) << "Graph loader finished, job_id: " << internal_job_id
                   << ", res: " << res;
 
-        update_job_meta(graph_name, pid_copied, bulk_loading_job_log, res);
+        update_job_meta(internal_job_id, bulk_loading_job_log, res);
 
         bulk_loading_job_count.fetch_sub(1);
         LOG(INFO) << "Bulk loading job finished, job count: "
@@ -1036,16 +1040,16 @@ gs::Result<int32_t> WorkDirManipulator::load_graph_impl(
           }
           std::filesystem::rename(tmp_indices_dir, final_indices_dir);
         }
-        return res;
+        return gs::Result<seastar::sstring>(gs::Status::OK());
       });
   // try to wait for 1 second, and check whether the process is still running.
-  // wait until pid is not 0
-  while (pid == 0) {
+  // wait until job_id is not empty.
+  while (job_id.empty()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  LOG(INFO) << "Successfully convert process id to int32_t: " << pid;
-  return gs::Result<int32_t>(const_cast<int32_t&>(pid));
+  LOG(INFO) << "Successfully create job " << job_id;
+  return gs::Result<seastar::sstring>(job_id);
 }
 
 std::vector<std::string> WorkDirManipulator::get_runnable_procedures() {
@@ -1062,25 +1066,86 @@ std::vector<std::string> WorkDirManipulator::get_runnable_procedures() {
   return runnable_procedures;
 }
 
-std::string WorkDirManipulator::get_job_dir(int32_t pid) {
-  return workspace + "/jobs/" + std::to_string(pid);
+std::string WorkDirManipulator::get_job_dir(const std::string& job_id) {
+  // if workspace + "/jobs" not exists, create it.
+  auto job_dir = workspace + "/jobs";
+  if (!std::filesystem::exists(job_dir)) {
+    std::filesystem::create_directory(job_dir);
+  }
+  return workspace + "/jobs/" + job_id;
 }
 
-gs::Result<std::string> WorkDirManipulator::create_job_dir(int32_t pid) {
-  auto job_dir = workspace + "/jobs/" + std::to_string(pid);
+gs::Result<seastar::sstring> WorkDirManipulator::create_job(
+    const std::string& graph_name, int64_t time_stamp, int32_t pid,
+    const std::string& tmp_log_file) {
+  // job_{graph_name}_{time_stamp}_{pid}
+  auto job_id = std::string("job_") + graph_name + "_" +
+                std::to_string(time_stamp) + "_" + std::to_string(pid);
+  auto job_dir = get_job_dir(job_id);
   if (!std::filesystem::create_directory(job_dir)) {
     LOG(ERROR) << "Fail to create job dir: " << job_dir;
-    return gs::Result<std::string>(gs::Status(
+    return gs::Result<seastar::sstring>(gs::Status(
         gs::StatusCode::InternalError,
         "Fail to create job dir: " + job_dir + ", error: " + strerror(errno)));
   }
-  return gs::Result<std::string>(job_dir);
+  open_and_write_content(job_dir, JOB_STATUS_FILE_NAME, "RUNNING");
+  // write the path to the tmp log file
+  open_and_write_content(job_dir, JOB_TMP_LOG_FILE_NAME, tmp_log_file);
+  // write graph_name
+  open_and_write_content(job_dir, GRAPH_NAME_FILE_NAME, graph_name);
+  return gs::Result<seastar::sstring>(std::move(job_id));
 }
 
-std::string WorkDirManipulator::get_job_meta(int32_t pid,
+gs::Result<int32_t> WorkDirManipulator::get_pid_from_job_id(
+    const std::string& job_id) {
+  // job_{graph_name}_{create_time}_{pid}
+  auto job_id_str = job_id;
+  if (job_id_str.find("job_") != 0) {
+    return gs::Result<int32_t>(
+        gs::Status(gs::StatusCode::InternalError, "Invalid job id: " + job_id));
+  }
+  // find last _
+  auto last_ = job_id_str.find_last_of("_");
+  if (last_ == std::string::npos) {
+    return gs::Result<int32_t>(
+        gs::Status(gs::StatusCode::InternalError, "Invalid job id: " + job_id));
+  }
+  auto pid_str = job_id_str.substr(last_ + 1);
+  try {
+    auto pid = std::stoi(pid_str);
+    return gs::Result<int32_t>(pid);
+  } catch (const std::exception& e) {
+    return gs::Result<int32_t>(
+        gs::Status(gs::StatusCode::InternalError,
+                   "Fail to parse pid from job id: " + job_id));
+  }
+  // default return gs::StatusCode::InternalError;
+  return gs::Result<int32_t>(
+      gs::Status(gs::StatusCode::InternalError,
+                 "Fail to parse pid from job id: " + job_id));
+}
+
+std::string WorkDirManipulator::get_start_time_from_job_id(
+    const std::string& job_id) {
+  // job_{graph_name}_{create_time}_{pid}
+  auto job_id_str = job_id;
+  // find last _
+  auto last_ = job_id_str.find_last_of("_");
+  if (last_ == std::string::npos) {
+    return "UNKOWN";
+  }
+  // find last before last _
+  auto last_before_last_ = job_id_str.find_last_of("_", last_ - 1);
+  if (last_before_last_ == std::string::npos) {
+    return "UNKOWN";
+  }
+  return job_id_str.substr(last_before_last_ + 1, last_ - 1);
+}
+
+std::string WorkDirManipulator::get_job_meta(const std::string& job_id,
                                              const std::string& file_name,
                                              const std::string& default_value) {
-  auto job_dir = get_job_dir(pid);
+  auto job_dir = get_job_dir(job_id);
   auto file_path = job_dir + "/" + file_name;
   if (!std::filesystem::exists(file_path)) {
     return default_value;
@@ -1138,34 +1203,15 @@ std::string WorkDirManipulator::get_tmp_bulk_loading_job_log_path(
   return file_name;
 }
 
-void WorkDirManipulator::init_job_meta(const std::string& graph_name,
-                                       int32_t pid,
-                                       const std::string& tmp_log_file) {
-  auto job_dir = get_job_dir(pid);
-  open_and_write_content(job_dir, GRAPH_NAME_FILE_NAME, graph_name);
-  open_and_write_content(job_dir, JOB_STATUS_FILE_NAME, "RUNNING");
-  // write the path to the tmp log file
-  open_and_write_content(job_dir, JOB_TMP_LOG_FILE_NAME, tmp_log_file);
-  // write current time to start_time file
-  auto current_time = std::chrono::system_clock::now();
-  auto current_time_str = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              current_time.time_since_epoch())
-                              .count();
-  open_and_write_content(job_dir, START_TIME_FILE_NAME,
-                         std::to_string(current_time_str));
-}
-
-void WorkDirManipulator::update_job_meta(const std::string& graph_name,
-                                         int32_t pid,
+void WorkDirManipulator::update_job_meta(const std::string& job_id,
                                          const std::string& tmp_log_file,
                                          int32_t exit_code) {
   // first check whether the job is already cancelled.
-  if (get_job_meta(pid, JOB_STATUS_FILE_NAME, "") == "CANCELLED") {
+  if (get_job_meta(job_id, JOB_STATUS_FILE_NAME, "") == "CANCELLED") {
     LOG(INFO) << "Job is already cancelled, do nothing.";
     return;
   }
-  auto job_dir = get_job_dir(pid);
-  open_and_write_content(job_dir, GRAPH_NAME_FILE_NAME, graph_name);
+  auto job_dir = get_job_dir(job_id);
   if (exit_code == 0) {
     open_and_write_content(job_dir, JOB_STATUS_FILE_NAME, "SUCCESS");
   } else {
@@ -1192,11 +1238,11 @@ void WorkDirManipulator::update_job_meta(const std::string& graph_name,
   open_and_write_content(job_dir, END_TIME_FILE_NAME,
                          std::to_string(current_time_str));
 
-  LOG(INFO) << "Successfully update job meta: " << job_dir << ",pid: " << pid
-            << ", exit code: " << exit_code;
+  LOG(INFO) << "Successfully update job meta: " << job_dir
+            << ",job_id: " << job_id << ", exit code: " << exit_code;
 }
 
-void WorkDirManipulator::update_cancelled_job_meta(int32_t job_id) {
+void WorkDirManipulator::update_cancelled_job_meta(const std::string& job_id) {
   auto job_dir = get_job_dir(job_id);
   open_and_write_content(job_dir, JOB_STATUS_FILE_NAME, "CANCELLED");
 
@@ -1682,19 +1728,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::dump_yaml_to_file(
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::GetJob(
-    const std::string& job_id) {
-  // convert to int32_t
-  int32_t pid;
-  try {
-    pid = std::stoi(job_id);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Fail to convert job_id to int32_t: " << job_id
-               << ", error: " << e.what();
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::InValidArgument, "Fail to convert job_id to int32_t: " +
-                                             job_id + ", error: " + e.what()));
-  }
-
+    const seastar::sstring& job_id_sstring) {
+  std::string job_id = job_id_sstring;
   auto job_dir = workspace + "/jobs/" + job_id;
   if (!std::filesystem::exists(job_dir)) {
     return gs::Result<seastar::sstring>(
@@ -1717,22 +1752,22 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetJob(
   nlohmann::json json;
   json["job_id"] = job_id;
   json["type"] = "bulk_loading";
-  json["status"] = get_job_meta(pid, JOB_STATUS_FILE_NAME, "UNKNOWN");
-  json["start_time"] = get_job_meta(pid, START_TIME_FILE_NAME, "UNKNOWN");
-  auto end_time = get_job_meta(pid, END_TIME_FILE_NAME, "");
+  json["status"] = get_job_meta(job_id, JOB_STATUS_FILE_NAME, "UNKNOWN");
+  json["start_time"] = get_start_time_from_job_id(job_id);
+  auto end_time = get_job_meta(job_id, END_TIME_FILE_NAME, "");
   if (!end_time.empty()) {
     json["end_time"] = end_time;
   }
   json["detail"]["graph_name"] =
-      get_job_meta(pid, GRAPH_NAME_FILE_NAME, "UNKNOWN");
+      get_job_meta(job_id, GRAPH_NAME_FILE_NAME, "UNKOWN");
   // if the job is running, we should redirect to the tmp log file.
   if (json["status"] == "RUNNING") {
-    auto tmp_log_path = get_job_meta(pid, JOB_TMP_LOG_FILE_NAME, "");
+    auto tmp_log_path = get_job_meta(job_id, JOB_TMP_LOG_FILE_NAME, "");
     VLOG(10) << "Tmp log path: " << tmp_log_path;
     // read last five lines from tmp_log_path
     json["log"] = get_file_content(tmp_log_path, 200);
   } else {
-    auto log_path = get_job_dir(pid) + "/" + JOB_LOG_FILE_NAME;
+    auto log_path = get_job_dir(job_id) + "/" + JOB_LOG_FILE_NAME;
     json["log"] = get_file_content(log_path, 200);
   }
   return gs::Result<seastar::sstring>(json.dump(2));
@@ -1744,28 +1779,31 @@ gs::Result<seastar::sstring> WorkDirManipulator::ListJobs() {
   json["jobs"] = nlohmann::json::array();
   // get all sub directories in workspace/jobs
   auto job_dir = workspace + "/jobs";
-  std::vector<int32_t> job_ids;
+  std::vector<std::string> job_ids;
+  // if job_dir not exists, we return empty json, and create the directory.
   if (!std::filesystem::exists(job_dir)) {
-    return gs::Result<seastar::sstring>(
-        gs::Status(gs::StatusCode::NotExists, "Job directory not exists"));
+    std::filesystem::create_directory(job_dir);
+    return gs::Result<seastar::sstring>(json["jobs"].dump(2));
   }
   for (const auto& entry : std::filesystem::directory_iterator(job_dir)) {
     if (entry.is_directory()) {
       auto job_id = entry.path().filename().string();
-      // if job_id is a number, then we add it to job_ids
-      try {
-        auto pid = std::stoi(job_id);
-        job_ids.push_back(pid);
-      } catch (const std::exception& e) {
-        LOG(ERROR) << "Fail to convert job_id to int32_t: " << job_id
-                   << ", error: " << e.what();
+      // if job_id start with job_ , we add it to job_ids
+      if (job_id.find("job_") == 0) {
+        try {
+          job_ids.push_back(job_id);
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "Fail to convert job_id to int32_t: " << job_id
+                     << ", error: " << e.what();
+          continue;
+        }
       }
     }
   }
   LOG(INFO) << "collect job ids: " << job_ids.size();
   // for each job_id, we get the job meta
   for (const auto& job_id : job_ids) {
-    auto job_res = GetJob(std::to_string(job_id));
+    auto job_res = GetJob(job_id);
     if (!job_res.ok()) {
       LOG(ERROR) << "Fail to get job: " << job_id
                  << ", error: " << job_res.status().error_message();
@@ -1778,17 +1816,8 @@ gs::Result<seastar::sstring> WorkDirManipulator::ListJobs() {
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::CancelJob(
-    const std::string& job_id) {
-  int32_t pid;
-  try {
-    pid = std::stoi(job_id);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Fail to convert job_id to int32_t: " << job_id
-               << ", error: " << e.what();
-    return gs::Result<seastar::sstring>(gs::Status(
-        gs::StatusCode::InValidArgument, "Fail to convert job_id to int32_t: " +
-                                             job_id + ", error: " + e.what()));
-  }
+    const seastar::sstring& job_id_sstring) {
+  std::string job_id = job_id_sstring;
   // check whether job exists
   auto job_dir = workspace + "/jobs/" + job_id;
   if (!std::filesystem::exists(job_dir)) {
@@ -1796,20 +1825,19 @@ gs::Result<seastar::sstring> WorkDirManipulator::CancelJob(
         gs::Status(gs::StatusCode::NotExists, "Job not exists: " + job_id));
   }
   // check whether job is running
-  auto status = get_job_meta(pid, JOB_STATUS_FILE_NAME, "UNKNOWN");
+  auto status = get_job_meta(job_id, JOB_STATUS_FILE_NAME, "UNKNOWN");
   if (status != "RUNNING") {
     return gs::Result<seastar::sstring>(
         gs::Status(gs::StatusCode::InternalError,
                    "Job is not running, can not cancel: " + job_id));
   }
-  // first, update_job_meta and then cancel.
-  // It seems that the redirected file is cleaned up after the process is
-  // killed. So we need to update_job_meta first.
+  // get pid from job_id
+  auto res = get_pid_from_job_id(job_id);
+  if (!res.ok()) {
+    return gs::Result<seastar::sstring>(res.status());
+  }
+  auto pid = res.value();
 
-  // kill the process
-  // kill -9
-  // auto res = kill(pid, SIGKILL);
-  // auto res = kill(pid, SIGINT);
   boost::process::child::child_handle child(pid);
   std::error_code ec;
   boost::process::detail::api::terminate(child, ec);
@@ -1821,7 +1849,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::CancelJob(
         "Fail to kill process: " + std::to_string(pid) +
             ", error: " + std::to_string(ec.value()) + ", " + ec.message()));
   }
-  update_cancelled_job_meta(pid);
+  update_cancelled_job_meta(job_id);
 
   return gs::Result<seastar::sstring>(gs::Status::OK(),
                                       "Successfully cancelled job: " + job_id);

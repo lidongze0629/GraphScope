@@ -183,11 +183,11 @@ seastar::future<admin_query_result> admin_actor::run_graph_loading(
       graph_name, yaml, loading_thread_num, bulk_loading_job_count_);
 
   if (graph_loading_res.ok()) {
-    auto process_id = graph_loading_res.value();
+    auto job_id = graph_loading_res.value();
     VLOG(10) << "Successfully invoke graph loading, jobid(processid): "
-             << process_id;
+             << job_id;
     //"{\"job_id\":" + std::to_string(process_id) + "}"
-    seastar::sstring res = "{\"job_id\":" + std::to_string(process_id) + "}";
+    seastar::sstring res = "{\"job_id\":\"" + job_id + "\"}";
     return seastar::make_ready_future<admin_query_result>(
         gs::Result{std::move(res)});
   } else {
