@@ -191,7 +191,7 @@ class WorkDirManipulator {
 
   static gs::Result<int32_t> get_pid_from_job_id(const std::string& job_id);
 
-  static std::string get_start_time_from_job_id(const std::string& job_id);
+  static int64_t get_start_time_from_job_id(const std::string& job_id);
 
   static std::string get_file_content(const std::string& file_name,
                                       int32_t last_lines_limit);

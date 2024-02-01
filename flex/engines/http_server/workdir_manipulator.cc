@@ -1125,21 +1125,27 @@ gs::Result<int32_t> WorkDirManipulator::get_pid_from_job_id(
                  "Fail to parse pid from job id: " + job_id));
 }
 
-std::string WorkDirManipulator::get_start_time_from_job_id(
+int64_t WorkDirManipulator::get_start_time_from_job_id(
     const std::string& job_id) {
   // job_{graph_name}_{create_time}_{pid}
   auto job_id_str = job_id;
   // find last _
   auto last_ = job_id_str.find_last_of("_");
   if (last_ == std::string::npos) {
-    return "UNKOWN";
+    return -1;
   }
   // find last before last _
   auto last_before_last_ = job_id_str.find_last_of("_", last_ - 1);
   if (last_before_last_ == std::string::npos) {
-    return "UNKOWN";
+    return -1;
   }
-  return job_id_str.substr(last_before_last_ + 1, last_ - 1);
+  auto str =
+      job_id_str.substr(last_before_last_ + 1, last_ - last_before_last_ - 1);
+  try {
+    auto start_time = std::stoll(str);
+    return start_time;
+  } catch (const std::exception& e) { return -1; }
+  return -1;
 }
 
 std::string WorkDirManipulator::get_job_meta(const std::string& job_id,
@@ -1756,7 +1762,11 @@ gs::Result<seastar::sstring> WorkDirManipulator::GetJob(
   json["start_time"] = get_start_time_from_job_id(job_id);
   auto end_time = get_job_meta(job_id, END_TIME_FILE_NAME, "");
   if (!end_time.empty()) {
-    json["end_time"] = end_time;
+    // try to convert to int64_t, if failed, use -1;
+    try {
+      int64_t end_time_int = std::stoll(end_time);
+      json["end_time"] = end_time_int;
+    } catch (const std::exception& e) { json["end_time"] = -1; }
   }
   json["detail"]["graph_name"] =
       get_job_meta(job_id, GRAPH_NAME_FILE_NAME, "UNKOWN");
