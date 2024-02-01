@@ -138,16 +138,6 @@ seastar::future<admin_query_result> admin_actor::run_delete_graph(
 // load the graph.
 seastar::future<admin_query_result> admin_actor::run_graph_loading(
     graph_management_param&& query_param) {
-  // wait until the number of bulk loading jobs is less than the max number
-  // of bulk loading jobs
-  while (bulk_loading_job_count_.load(std::memory_order_relaxed) >=
-         MAX_BULK_LOADING_JOB_COUNT) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-  }
-  // increase the number of bulk loading jobs
-  bulk_loading_job_count_.fetch_add(1, std::memory_order_relaxed);
-  LOG(INFO) << "Start loading graph, job count:  " << bulk_loading_job_count_;
-
   // query_param constains two parameter, first for graph name, second for graph
   // config
   auto content = query_param.content;
@@ -179,8 +169,29 @@ seastar::future<admin_query_result> admin_actor::run_graph_loading(
     loading_thread_num = yaml["loading_thread_num"].as<int32_t>();
   }
 
+  // wait until the number of bulk loading jobs is less than the max number
+  // of bulk loading jobs
+  if (bulk_loading_job_count_.load(std::memory_order_relaxed) >=
+      MAX_BULK_LOADING_JOB_COUNT) {
+    LOG(INFO) << "The number of bulk loading jobs is more than the max number "
+                 "of bulk loading jobs: "
+              << MAX_BULK_LOADING_JOB_COUNT;
+    return seastar::make_exception_future<admin_query_result>(
+        std::runtime_error(
+            "The number of bulk loading jobs is more than the max "
+            "number of bulk loading jobs: " +
+            std::to_string(MAX_BULK_LOADING_JOB_COUNT)));
+  }
+  // increase the number of bulk loading jobs
+  bulk_loading_job_count_.fetch_add(1, std::memory_order_relaxed);
+  LOG(INFO) << "Start loading graph, job count:  " << bulk_loading_job_count_;
+
   auto graph_loading_res = server::WorkDirManipulator::LoadGraph(
-      graph_name, yaml, loading_thread_num, bulk_loading_job_count_);
+      graph_name, yaml, loading_thread_num,
+      AtomicIntDecrementer{
+          bulk_loading_job_count_});  // use resource object to decrease the
+                                      // bulk_loading_job_count_ when the object
+                                      // is destructed
 
   if (graph_loading_res.ok()) {
     auto job_id = graph_loading_res.value();

@@ -34,18 +34,29 @@
 
 namespace server {
 
+// A struct which represents a lock file.
+// remove the lock file when the struct is destructed.
 struct LockFile {
   std::string graph_name;
   std::string lock_path;
-  LockFile() = default;
-  LockFile(const std::string& graph_name, const std::string& lock_path)
-      : graph_name(graph_name), lock_path(lock_path) {}
 
-  ~LockFile() {
-    if (std::filesystem::exists(lock_path)) {
-      std::filesystem::remove(lock_path);
-    }
-  }
+  LockFile() = default;
+  ~LockFile();
+  LockFile(const std::string& graph_name, const std::string& lock_path);
+  LockFile(const LockFile&) = delete;
+  LockFile& operator=(const LockFile&) = delete;
+  LockFile(LockFile&& other);
+};
+
+// Ensure the atomic int got descreased when the struct is destructed.
+struct AtomicIntDecrementer {
+  std::atomic<int32_t>* count_;
+
+  AtomicIntDecrementer(std::atomic<int32_t>& count);
+  ~AtomicIntDecrementer();
+  AtomicIntDecrementer(const AtomicIntDecrementer&) = delete;
+  AtomicIntDecrementer& operator=(const AtomicIntDecrementer&) = delete;
+  AtomicIntDecrementer(AtomicIntDecrementer&& other);
 };
 
 /**
@@ -124,7 +135,7 @@ class WorkDirManipulator {
    */
   static gs::Result<seastar::sstring> LoadGraph(
       const std::string& graph_name, const YAML::Node& yaml_node,
-      int32_t loading_thread_num, std::atomic<int32_t>& bulk_loading_job_count);
+      int32_t loading_thread_num, AtomicIntDecrementer&& decrementer);
 
   /**
    * @brief Get all procedures bound to the graph.
@@ -213,8 +224,8 @@ class WorkDirManipulator {
    */
   static gs::Result<seastar::sstring> load_graph_impl(
       const std::string& yaml_config_file, const std::string& graph_name,
-      int32_t thread_num, bool overwrite,
-      std::atomic<int32_t>& bulk_loading_job_count, LockFile&& lock_file);
+      int32_t thread_num, bool overwrite, AtomicIntDecrementer&& decrementer,
+      LockFile&& lock_file);
 
   static gs::Result<seastar::sstring> create_procedure_sanity_check(
       const nlohmann::json& json);

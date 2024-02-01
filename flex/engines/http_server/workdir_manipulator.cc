@@ -31,6 +31,34 @@
   }
 
 namespace server {
+
+LockFile::LockFile(const std::string& graph_name, const std::string& lock_path)
+    : graph_name(graph_name), lock_path(lock_path) {}
+LockFile::~LockFile() {
+  if (std::filesystem::exists(lock_path)) {
+    std::filesystem::remove(lock_path);
+  }
+}
+
+LockFile::LockFile(LockFile&& other)
+    : graph_name(std::move(other.graph_name)),
+      lock_path(std::move(other.lock_path)) {}
+
+AtomicIntDecrementer::AtomicIntDecrementer(std::atomic<int32_t>& count)
+    : count_(&count) {}
+
+AtomicIntDecrementer::~AtomicIntDecrementer() {
+  if (count_) {
+    CHECK(*count_ > 0);
+    (*count_)--;
+  }
+}
+
+AtomicIntDecrementer::AtomicIntDecrementer(AtomicIntDecrementer&& other)
+    : count_(other.count_) {
+  other.count_ = nullptr;
+}
+
 std::string WorkDirManipulator::workspace = ".";  // default to .
 
 static void open_and_write_content(const std::string& job_dir,
@@ -315,7 +343,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::DeleteGraph(
 
 gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
     const std::string& graph_name, const YAML::Node& yaml_node,
-    int32_t loading_thread_num, std::atomic<int>& bulk_loading_job_count) {
+    int32_t loading_thread_num, AtomicIntDecrementer&& job_count_decrementer) {
   // First check whether graph exists
   if (!is_graph_exist(graph_name)) {
     return gs::Result<seastar::sstring>(gs::Status(
@@ -346,7 +374,6 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   }
   // We use a local object to ensure the lock is released when the function
   // returns.
-  auto lock_file_obj = lock_res.value();
 
   // No need to check whether graph exists, because it is checked in LoadGraph
   // First load schema
@@ -389,9 +416,10 @@ gs::Result<seastar::sstring> WorkDirManipulator::LoadGraph(
   bool overwrite = loading_config.GetMethod() == gs::BulkLoadMethod::kOverwrite
                        ? true
                        : false;
-  return load_graph_impl(temp_file_path, graph_name, loading_thread_num,
-                         overwrite, bulk_loading_job_count,
-                         std::move(lock_res.move_value()));
+  return load_graph_impl(
+      temp_file_path, graph_name, loading_thread_num, overwrite,
+      std::forward<AtomicIntDecrementer>(job_count_decrementer),
+      std::forward<LockFile>(lock_res.move_value()));
 }
 
 gs::Result<seastar::sstring> WorkDirManipulator::GetProceduresByGraphName(
@@ -958,8 +986,7 @@ gs::Result<seastar::sstring> WorkDirManipulator::dump_graph_schema(
 gs::Result<seastar::sstring> WorkDirManipulator::load_graph_impl(
     const std::string& config_file_path, const std::string& graph_name,
     int32_t loading_thread_num, bool overwrite,
-    std::atomic<int>& bulk_loading_job_count, LockFile&& lock_file) {
-  // TODO: call GRAPH_LOADER_BIN.
+    AtomicIntDecrementer&& decrementer, LockFile&& lock_file) {
   auto schema_file = GetGraphSchemaPath(graph_name);
   auto final_indices_dir = GetGraphIndicesDir(graph_name);
   std::string tmp_indices_dir;
@@ -983,72 +1010,61 @@ gs::Result<seastar::sstring> WorkDirManipulator::load_graph_impl(
 
   // call the command asynchronously
   std::string job_id;
-  hiactor::thread_resource_pool::submit_work(
-      [cmd_string, lock_file = std::move(lock_file),
-       tmp_indices_dir = std::move(tmp_indices_dir),
-       final_indices_dir = std::move(final_indices_dir),
-       graph_name = std::move(graph_name), overwrite = std::move(overwrite),
-       bulk_loading_job_log = std::move(bulk_loading_job_log), &job_id,
-       &bulk_loading_job_count]() {
-        // pass pid as reference is ok, since we will block until pid is not 0.
-        // pass bulk_loading_job_count as reference is ok, since we it is
-        // allocated in admin_actor
 
-        // std::ofstream logFile(bulk_loading_job_log);
-        // auto res = std::system(cmd_string.c_str());
-        // redirect stdout and stderr to log file
-        boost::process::child child_handle(
-            cmd_string, boost::process::std_out > bulk_loading_job_log,
-            boost::process::std_err > bulk_loading_job_log);
-        auto internal_pid = child_handle.id();
-        // create a copy inside, so even pid is released after function return,
-        // we still know the pid.
-        // create init job status
-        // get current time
-        auto create_time =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch());
-        std::string internal_job_id;
-        ASSIGN_AND_RETURN_IF_NOT_OK(
-            internal_job_id, create_job(graph_name, create_time.count(),
-                                        internal_pid, bulk_loading_job_log));
-        LOG(INFO) << "Successfully create job: " << internal_job_id;
-        // after job meta is created, we can let the parent process continue.
-        job_id = internal_job_id;
-        child_handle.wait();
-        // get child exit code
-        auto res = child_handle.exit_code();
-        // logFile.close();
-        LOG(INFO) << "Graph loader finished, job_id: " << internal_job_id
-                  << ", res: " << res;
+  auto fut =
+      hiactor::thread_resource_pool::submit_work(
+          [&job_id, copied_graph_name = graph_name,
+           cmd_string_copied = cmd_string,
+           tmp_indices_dir_copied = tmp_indices_dir,
+           final_indices_dir_copied = final_indices_dir, overwrite,
+           bulk_loading_job_log_copied = bulk_loading_job_log]() mutable {
+            boost::process::child child_handle(
+                cmd_string_copied,
+                boost::process::std_out > bulk_loading_job_log_copied,
+                boost::process::std_err > bulk_loading_job_log_copied);
+            int32_t pid = child_handle.id();
 
-        update_job_meta(internal_job_id, bulk_loading_job_log, res);
+            auto create_time =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch());
+            ASSIGN_AND_RETURN_IF_NOT_OK(
+                job_id, create_job(copied_graph_name, create_time.count(), pid,
+                                   bulk_loading_job_log_copied));
+            auto internal_job_id = job_id;
+            child_handle.wait();
+            auto res = child_handle.exit_code();
+            LOG(INFO) << "Graph loader finished, job_id: " << internal_job_id
+                      << ", res: " << res;
 
-        bulk_loading_job_count.fetch_sub(1);
-        LOG(INFO) << "Bulk loading job finished, job count: "
-                  << bulk_loading_job_count.load();
-        // if overwrite, then remove final_indices_dir and rename
-        // tmp_indices_dir to
-        // final_indices_dir, otherwise, do nothing.
-        if (res == 0 && overwrite) {
-          LOG(INFO) << "Overwrite is true, rename tmp_indices_dir to "
-                       "final_indices_dir: "
-                    << tmp_indices_dir << " -> " << final_indices_dir;
-          CHECK(std::filesystem::exists(tmp_indices_dir));
-          if (std::filesystem::exists(final_indices_dir)) {
-            std::filesystem::remove_all(final_indices_dir);
-          }
-          std::filesystem::rename(tmp_indices_dir, final_indices_dir);
-        }
-        return gs::Result<seastar::sstring>(gs::Status::OK());
-      });
-  // try to wait for 1 second, and check whether the process is still running.
-  // wait until job_id is not empty.
+            update_job_meta(internal_job_id, bulk_loading_job_log_copied, res);
+            if (res == 0 && overwrite) {
+              LOG(INFO) << "Overwrite is true, rename tmp_indices_dir to "
+                           "final_indices_dir: "
+                        << tmp_indices_dir_copied << " -> "
+                        << final_indices_dir_copied;
+              CHECK(std::filesystem::exists(tmp_indices_dir_copied));
+              if (std::filesystem::exists(final_indices_dir_copied)) {
+                std::filesystem::remove_all(final_indices_dir_copied);
+              }
+              std::filesystem::rename(tmp_indices_dir_copied,
+                                      final_indices_dir_copied);
+            }
+            return gs::Result<seastar::sstring>(gs::Status::OK());
+          })
+          .then_wrapped(
+              [lock_file_copied = std::move(lock_file),
+               decrementer_copied = std::move(decrementer)](auto&& f) {
+                // the destructor of lock_file will unlock the graph.
+                // the destructor of decrementer will decrement the job count.
+                return gs::Result<seastar::sstring>(gs::Status::OK());
+              });
+
   while (job_id.empty()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  LOG(INFO) << "Successfully create job " << job_id;
+  LOG(INFO) << "Successfully create job: " << job_id;
+
   return gs::Result<seastar::sstring>(job_id);
 }
 
