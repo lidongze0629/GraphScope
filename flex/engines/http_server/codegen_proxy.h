@@ -80,7 +80,7 @@ class CodegenProxy {
   // time, we need to ensure that only one codegen is running.
   // if graph_schema_path is not prvoided, we will use the default graph schema
   seastar::future<std::pair<int32_t, std::string>> DoGen(
-      const physical::PhysicalPlan& plan, std::string graph_schema_path = "");
+      const physical::PhysicalPlan& plan);
 
   static seastar::future<int> CallCodegenCmd(
       const std::string& codegen_bin, const std::string& plan_path,

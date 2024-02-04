@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 #include "flex/engines/http_server/codegen_proxy.h"
+#include "flex/engines/http_server/workdir_manipulator.h"
 
 namespace server {
 CodegenProxy& CodegenProxy::get() {
@@ -56,7 +57,7 @@ void CodegenProxy::Init(std::string working_dir, std::string codegen_bin,
 }
 
 seastar::future<std::pair<int32_t, std::string>> CodegenProxy::DoGen(
-    const physical::PhysicalPlan& plan, std::string graph_schema_path) {
+    const physical::PhysicalPlan& plan) {
   LOG(INFO) << "Start generating for query: ";
   auto next_job_id = plan.plan_id();
 
@@ -66,8 +67,18 @@ seastar::future<std::pair<int32_t, std::string>> CodegenProxy::DoGen(
              [this, next_job_id] { return !check_job_running(next_job_id); });
   }
 
+  auto graph_schema_path = default_graph_schema_;
+
   if (graph_schema_path.empty()) {
-    graph_schema_path = default_graph_schema_;
+    // graph_schema_path = default_graph_schema_;
+    graph_schema_path = WorkDirManipulator::GetGraphSchemaPath(
+        WorkDirManipulator::GetRunningGraph());
+  }
+
+  if (graph_schema_path.empty()) {
+    LOG(ERROR) << "Graph schema path is empty";
+    return seastar::make_exception_future<std::pair<int32_t, std::string>>(
+        std::runtime_error("Graph schema path is empty"));
   }
 
   return call_codegen_cmd(plan, graph_schema_path)
