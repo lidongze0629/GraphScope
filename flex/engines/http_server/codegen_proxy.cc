@@ -43,20 +43,20 @@ bool CodegenProxy::Initialized() { return initialized_; }
 
 void CodegenProxy::Init(std::string working_dir, std::string codegen_bin,
                         std::string ir_compiler_prop,
-                        std::string compiler_graph_schema) {
+                        std::string graph_schema_path) {
   working_directory_ = working_dir;
   codegen_bin_ = codegen_bin;
   ir_compiler_prop_ = ir_compiler_prop;
-  compiler_graph_schema_ = compiler_graph_schema;
+  default_graph_schema_ = graph_schema_path;
   initialized_ = true;
   LOG(INFO) << "CodegenProxy working dir: " << working_directory_
             << ",codegen bin " << codegen_bin_ << ", ir compiler prop "
-            << ir_compiler_prop_ << ", compiler graph schema "
-            << compiler_graph_schema_;
+            << ir_compiler_prop_ << ", default graph schema "
+            << default_graph_schema_;
 }
 
 seastar::future<std::pair<int32_t, std::string>> CodegenProxy::DoGen(
-    const physical::PhysicalPlan& plan) {
+    const physical::PhysicalPlan& plan, std::string graph_schema_path) {
   LOG(INFO) << "Start generating for query: ";
   auto next_job_id = plan.plan_id();
 
@@ -66,28 +66,33 @@ seastar::future<std::pair<int32_t, std::string>> CodegenProxy::DoGen(
              [this, next_job_id] { return !check_job_running(next_job_id); });
   }
 
-  return call_codegen_cmd(plan).then_wrapped([this,
-                                              next_job_id](auto&& future) {
-    int return_code;
-    try {
-      return_code = future.get();
-    } catch (std::exception& e) {
-      LOG(ERROR) << "Compilation failed: " << e.what();
-      return seastar::make_ready_future<std::pair<int32_t, std::string>>(
-          std::make_pair(next_job_id,
-                         std::string("Compilation failed: ") + e.what()));
-    }
-    if (return_code != 0) {
-      LOG(ERROR) << "Codegen failed";
-      return seastar::make_exception_future<std::pair<int32_t, std::string>>(
-          std::runtime_error("Codegen failed"));
-    }
-    return get_res_lib_path_from_cache(next_job_id);
-  });
+  if (graph_schema_path.empty()) {
+    graph_schema_path = default_graph_schema_;
+  }
+
+  return call_codegen_cmd(plan, graph_schema_path)
+      .then_wrapped([this, next_job_id](auto&& future) {
+        int return_code;
+        try {
+          return_code = future.get();
+        } catch (std::exception& e) {
+          LOG(ERROR) << "Compilation failed: " << e.what();
+          return seastar::make_ready_future<std::pair<int32_t, std::string>>(
+              std::make_pair(next_job_id,
+                             std::string("Compilation failed: ") + e.what()));
+        }
+        if (return_code != 0) {
+          LOG(ERROR) << "Codegen failed";
+          return seastar::make_exception_future<
+              std::pair<int32_t, std::string>>(
+              std::runtime_error("Codegen failed"));
+        }
+        return get_res_lib_path_from_cache(next_job_id);
+      });
 }
 
 seastar::future<int> CodegenProxy::call_codegen_cmd(
-    const physical::PhysicalPlan& plan) {
+    const physical::PhysicalPlan& plan, const std::string& graph_schema_path) {
   // if the desired query lib for next_job_id is in cache, just return 0
   // otherwise, call codegen cmd
   auto next_job_id = plan.plan_id();
@@ -112,7 +117,7 @@ seastar::future<int> CodegenProxy::call_codegen_cmd(
 
   std::string expected_res_lib_path = work_dir + "/lib" + query_name + ".so";
   return CallCodegenCmd(codegen_bin_, plan_path, query_name, work_dir, work_dir,
-                        compiler_graph_schema_, ir_compiler_prop_)
+                        graph_schema_path, ir_compiler_prop_)
       .then([this, next_job_id, expected_res_lib_path](int codegen_res) {
         if (codegen_res != 0 ||
             !std::filesystem::exists(expected_res_lib_path)) {

@@ -108,8 +108,8 @@ void parse_from_server_config(const std::string& server_config_path,
 }
 
 void init_codegen_proxy(const bpo::variables_map& vm,
-                        const std::string& graph_schema_file,
-                        const std::string& engine_config_file) {
+                        const std::string& engine_config_file,
+                        const std::string& graph_schema_file = "") {
   std::string codegen_dir = parse_codegen_dir(vm);
   std::string codegen_bin;
   if (vm.count("codegen-bin") == 0) {
@@ -122,8 +122,13 @@ void init_codegen_proxy(const bpo::variables_map& vm,
       LOG(FATAL) << "codegen bin not exists: " << codegen_bin;
     }
   }
-  server::CodegenProxy::get().Init(codegen_dir, codegen_bin, engine_config_file,
-                                   graph_schema_file);
+  if (graph_schema_file.empty()) {
+    server::CodegenProxy::get().Init(codegen_dir, codegen_bin,
+                                     engine_config_file);
+  } else {
+    server::CodegenProxy::get().Init(codegen_dir, codegen_bin,
+                                     engine_config_file, graph_schema_file);
+  }
 }
 
 void initWorkspace(const std::string workspace, int32_t thread_num,
@@ -243,6 +248,7 @@ int main(int argc, char** argv) {
                       service_config.default_graph);
     // Suppose the default_graph is already loaded.
     LOG(INFO) << "Finish init workspace";
+    gs::init_codegen_proxy(vm, engine_config_file);
 
     // During the running of the server, we may use some file to denote the lock
     // or running graph.
@@ -279,7 +285,7 @@ int main(int argc, char** argv) {
     }
 
     // Ths schema is loaded just to get the plugin dir and plugin list
-    gs::init_codegen_proxy(vm, graph_schema_path, engine_config_file);
+    gs::init_codegen_proxy(vm, engine_config_file, graph_schema_path);
     db.Close();
     auto load_res =
         db.Open(schema.value(), data_path, service_config.shard_num);
