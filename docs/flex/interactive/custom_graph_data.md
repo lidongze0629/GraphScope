@@ -137,7 +137,7 @@ The `import.yaml` file maps raw data fields to the schema of the "modern" graph 
 graph: movies
 loading_config:
   data_source:
-    scheme: file  # file, oss, s3, hdfs; only file is supported now
+    scheme: file  # only file and odps is supported now
     location: /home/graphscope/movies/
   import_option: init # append, overwrite, only init is supported now
   format:
@@ -211,4 +211,4 @@ Now you can move to [Stored Procedure](./stored_procedures) to explore querying 
 
 ## Try other graphs
 
-In addition to `movies` graph, we have also prepared the `graph_algo` graph. You can find the raw CSV files, graph.yaml, and import.yaml in the `./examples/graph_algo/` directory. You can import the `graph_algo` graph just like importing the `movies` graph.
+In addition to `movies` graph, we have also prepared the `graph_algo` graph. You can find the raw CSV files, graph.yaml, and import.yaml in the `./examples/graph_algo/` directory. You can import the `graph_algo` graph just like importing the `movies` graph. There are also some sample cypher queries, you can find them at [GraphScope/flex/interactive/examples/graph_algo](https://github.com/alibaba/GraphScope/tree/main/flex/interactive/examples/graph_algo).
